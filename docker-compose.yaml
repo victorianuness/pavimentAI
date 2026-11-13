@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: pavimentai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pavimentai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_admin_ local}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_pavimentai:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pavimentai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pavimentai_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./api/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_pavimentai:/workspace/api/uploads
+
+volumes:
+  pgdata_pavimentai:
+  uploads_pavimentai:

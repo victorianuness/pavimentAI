@@ -1,0 +1,1920 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PavimentAI — Zeladoria Urbana Inteligente</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #mapa-principal, #mapa-previa-admin { z-index: 10; }
+    .marker-pin {
+      width: 24px; height: 24px; border-radius: 50% 50% 50% 0;
+      position: absolute; transform: rotate(-45deg);
+      left: 50%; top: 50%; margin: -15px 0 0 -12px;
+      border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+    }
+    .marker-pin::after {
+      content: ''; width: 10px; height: 10px; margin: 5px 0 0 5px;
+      background: #fff; position: absolute; border-radius: 50%;
+    }
+    .bbox-overlay {
+      position: absolute; border: 2px solid #ef4444;
+      background-color: rgba(239, 68, 68, 0.18); pointer-events: none;
+    }
+    .bbox-label {
+      position: absolute; top: -20px; left: -2px;
+      background: #ef4444; color: #fff; font-size: 10px;
+      font-weight: 700; padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+  <!-- BARRA DE NAVEGAÇÃO SUPERIOR -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-amber-500 flex items-center justify-center text-slate-950 font-black text-lg shadow">
+          P
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight tracking-tight">Paviment<span class="text-amber-400">AI</span></h1>
+          <p class="text-[11px] text-slate-400">Monitoramento Viário &amp; Acessibilidade com IA</p>
+        </div>
+      </div>
+
+      <!-- Abas de Navegação -->
+      <nav class="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm font-medium overflow-x-auto">
+        <button onclick="navegar('mapa')" id="tab-mapa" class="px-3 py-1.5 rounded-md bg-amber-500 text-slate-950 font-semibold">
+          Mapa Público
+        </button>
+        <button onclick="navegar('nova')" id="tab-nova" class="hidden px-3 py-1.5 rounded-md hover:bg-slate-800 text-slate-200">
+          + Registrar Ocorrência
+        </button>
+        <button onclick="navegar('minhas')" id="tab-minhas" class="hidden px-3 py-1.5 rounded-md hover:bg-slate-800 text-slate-200">
+          Minhas Ocorrências
+        </button>
+        <button onclick="navegar('gestao')" id="tab-gestao" class="hidden px-3 py-1.5 rounded-md hover:bg-slate-800 text-emerald-400 font-semibold">
+          Painel Gestor
+        </button>
+        <button onclick="navegar('admin')" id="tab-admin" class="hidden px-3 py-1.5 rounded-md hover:bg-slate-800 text-purple-400 font-semibold">
+          Admin
+        </button>
+      </nav>
+
+      <!-- Área de Usuário / Login -->
+      <div class="flex items-center gap-2">
+        <div id="user-logged-out" class="flex items-center gap-2">
+          <button onclick="abrirModalAuth('login')" class="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs sm:text-sm font-medium border border-slate-700">
+            Entrar
+          </button>
+          <button onclick="abrirModalAuth('cadastro')" class="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs sm:text-sm font-bold">
+            Criar Conta
+          </button>
+        </div>
+        <div id="user-logged-in" class="hidden flex items-center gap-2">
+          <button onclick="navegar('perfil')" class="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-xs flex items-center gap-2 border border-slate-700">
+            <span id="nav-user-nome" class="font-semibold truncate max-w-[120px]">Usuário</span>
+            <span id="nav-user-papel" class="px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 uppercase">cidadão</span>
+          </button>
+          <button onclick="logout()" title="Sair" class="px-2.5 py-1.5 rounded-md bg-red-600/20 hover:bg-red-600/40 text-red-300 text-xs font-medium">
+            Sair
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- BANNER DE ALERTA / TOAST -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0"></div>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-4 flex flex-col gap-4">
+
+    <!-- ==================== SEÇÃO 1: MAPA PÚBLICO ==================== -->
+    <section id="sec-mapa" class="flex flex-col gap-3 flex-1">
+      <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+          <label class="font-medium text-slate-600">Município:</label>
+          <select id="filtro-mapa-area" onchange="centralizarAreaSelecionada()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="">Todas as áreas atendidas</option>
+          </select>
+
+          <label class="font-medium text-slate-600 ml-1">Tipo:</label>
+          <select id="filtro-mapa-tipo" onchange="carregarMapaOcorrencias()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="">Todos</option>
+          </select>
+
+          <label class="font-medium text-slate-600 ml-1">Filtro IA:</label>
+          <select id="filtro-mapa-verif" onchange="carregarMapaOcorrencias()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="verificadas">Confirmadas (IA / Gestor)</option>
+            <option value="todas">Todas abertas (inclui em triagem)</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs">
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-600 inline-block"></span> Grave</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Moderado</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-600 inline-block"></span> Leve</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span> Acessibilidade/Outro</span>
+          <button onclick="carregarMapaOcorrencias()" class="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700">
+            Atualizar
+          </button>
+        </div>
+      </div>
+
+      <div class="relative flex-1 min-h-[480px] h-[68vh] bg-slate-200 rounded-xl overflow-hidden shadow border border-slate-300">
+        <div id="mapa-principal" class="w-full h-full"></div>
+        <button onclick="acionarNovaOcorrenciaDoMapa()" class="absolute bottom-5 right-5 z-20 px-4 py-3 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-lg flex items-center gap-2 text-sm transition transform hover:scale-105">
+          <span>+ Reportar Problema Aqui</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ==================== SEÇÃO 2: NOVA OCORRÊNCIA + FOTO IA ==================== -->
+    <section id="sec-nova" class="hidden max-w-2xl mx-auto w-full bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+      <h2 class="text-lg font-bold text-slate-900 mb-1">Registrar Nova Ocorrência</h2>
+      <p class="text-xs text-slate-500 mb-4">
+        Informe o local exato (dentro de um município atendido) e envie uma foto nítida para validação automática com Inteligência Artificial (YOLO11n).
+      </p>
+
+      <form id="form-ocorrencia" onsubmit="submeterOcorrencia(event)" class="space-y-4 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Tipo de Problema *</label>
+            <select id="occ-tipo" onchange="atualizarFormularioTipo()" required class="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white"></select>
+          </div>
+          <div id="wrap-occ-categoria" class="hidden">
+            <label class="block font-semibold text-slate-700 mb-1">Categoria *</label>
+            <select id="occ-categoria" class="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white"></select>
+          </div>
+          <div id="wrap-occ-gravidade">
+            <label class="block font-semibold text-slate-700 mb-1">Gravidade Estimada (Opcional)</label>
+            <select id="occ-gravidade" class="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white">
+              <option value="">Deixar a IA (YOLO) avaliar pela foto</option>
+              <option value="leve">Leve</option>
+              <option value="moderado">Moderado</option>
+              <option value="grave">Grave</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Ponto de Referência / Descrição (Opcional)</label>
+          <textarea id="occ-descricao" rows="2" maxlength="1000" placeholder="Ex.: Em frente ao nº 450, faixa da direita..." class="w-full border border-slate-300 rounded-lg px-3 py-2"></textarea>
+        </div>
+
+        <!-- Coordenadas GPS -->
+        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-slate-700 text-xs uppercase tracking-wider">Localização GPS *</span>
+            <button type="button" onclick="obterGPSAtual()" class="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold">
+              Usar Meu GPS Atual
+            </button>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-slate-500">Latitude</label>
+              <input type="number" step="any" id="occ-lat" required placeholder="-23.7115" class="w-full border border-slate-300 rounded px-2.5 py-1.5 text-xs" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500">Longitude</label>
+              <input type="number" step="any" id="occ-lon" required placeholder="-46.4134" class="w-full border border-slate-300 rounded px-2.5 py-1.5 text-xs" />
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-500">Dica: Você também pode clicar num ponto do Mapa Público antes de abrir esta tela.</p>
+        </div>
+
+        <!-- Alerta de Possível Duplicidade (409) -->
+        <div id="box-duplicidade-aviso" class="hidden bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-lg text-xs space-y-2">
+          <p class="font-bold">Atenção: Já existe(m) ocorrência(s) aberta(s) bem perto deste local!</p>
+          <ul id="lista-duplicadas-proximas" class="list-disc pl-4 space-y-1"></ul>
+          <label class="flex items-center gap-2 font-semibold pt-1 cursor-pointer">
+            <input type="checkbox" id="occ-forcar-duplicada" class="rounded text-amber-600" />
+            Confirmo que é outro problema e quero registrar mesmo assim.
+          </label>
+        </div>
+
+        <!-- Upload de Foto -->
+        <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+          <label class="block font-semibold text-slate-700 text-xs uppercase tracking-wider">Foto do Local (Validada por IA)</label>
+          <div class="flex flex-wrap gap-4 text-xs py-1">
+            <label class="flex items-center gap-1.5 cursor-pointer font-medium">
+              <input type="radio" name="occ-fonte-foto" value="camera" checked onchange="alternarModoCapturaFoto()" />
+              Câmera agora no local (Confirmação imediata IA)
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer font-medium">
+              <input type="radio" name="occ-fonte-foto" value="galeria" onchange="alternarModoCapturaFoto()" />
+              Galeria do aparelho (Exige data/GPS no EXIF e vai para triagem)
+            </label>
+          </div>
+          <input type="file" id="occ-arquivo-foto" accept="image/jpeg,image/png,image/webp" capture="environment" class="w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400" />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="navegar('mapa')" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 font-medium">
+            Cancelar
+          </button>
+          <button type="submit" id="btn-submit-occ" class="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow">
+            Registrar Ocorrência
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ==================== SEÇÃO 3: MINHAS OCORRÊNCIAS ==================== -->
+    <section id="sec-minhas" class="hidden flex-col gap-3">
+      <div class="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Minhas Ocorrências Registradas</h2>
+          <p class="text-xs text-slate-500">Acompanhe o status de análise da IA e da prefeitura.</p>
+        </div>
+        <button onclick="carregarMinhasOcorrencias()" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-semibold">
+          Atualizar Lista
+        </button>
+      </div>
+      <div id="lista-minhas-ocorrencias" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- ==================== SEÇÃO 4: PERFIL E RESIDÊNCIA ==================== -->
+    <section id="sec-perfil" class="hidden max-w-3xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Dados e Residência (CEP) -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h3 class="font-bold text-base border-b pb-2">Meu Perfil &amp; Município de Residência</h3>
+        <div id="perfil-dados-resumo" class="text-xs space-y-1 text-slate-600 bg-slate-50 p-3 rounded-lg"></div>
+
+        <form onsubmit="salvarResidenciaCEP(event)" class="space-y-2 pt-2 border-t text-xs">
+          <label class="block font-bold text-slate-700">Atualizar CEP de Residência (Cidadão)</label>
+          <div class="flex gap-2">
+            <input type="text" id="perfil-cep" maxlength="9" placeholder="09400-000" onblur="preencherPreviaCEP()" class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5" />
+            <button type="submit" class="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold">
+              Salvar CEP
+            </button>
+          </div>
+          <p id="perfil-cep-previa" class="text-[11px] text-slate-500"></p>
+        </form>
+
+        <form onsubmit="salvarPerfilNomeTel(event)" class="space-y-2 pt-2 border-t text-xs">
+          <label class="block font-bold text-slate-700">Alterar Nome / Telefone</label>
+          <input type="text" id="perfil-novo-nome" placeholder="Novo nome completo" class="w-full border border-slate-300 rounded-lg px-3 py-1.5" />
+          <input type="text" id="perfil-novo-tel" placeholder="DDD + Telefone (ex: 11999998888)" class="w-full border border-slate-300 rounded-lg px-3 py-1.5" />
+          <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold">
+            Atualizar Dados
+          </button>
+        </form>
+      </div>
+
+      <!-- Segurança e LGPD -->
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h3 class="font-bold text-base border-b pb-2">Segurança &amp; Privacidade (LGPD)</h3>
+        <form onsubmit="submeterTrocaSenha(event)" class="space-y-2 text-xs">
+          <label class="block font-bold text-slate-700">Trocar Senha</label>
+          <input type="password" id="senha-atual" required placeholder="Senha atual" class="w-full border border-slate-300 rounded-lg px-3 py-1.5" />
+          <input type="password" id="senha-nova" required minlength="8" placeholder="Nova senha (mínimo 8 caracteres)" class="w-full border border-slate-300 rounded-lg px-3 py-1.5" />
+          <button type="submit" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold">
+            Alterar Senha
+          </button>
+        </form>
+
+        <div class="pt-4 border-t space-y-2 text-xs">
+          <h4 class="font-bold text-red-700">Encerrar Conta e Anonimizar Dados (LGPD)</h4>
+          <p class="text-slate-500 text-[11px]">
+            Remove permanentemente seu nome, e-mail, telefone e CEP do banco de dados. Suas ocorrências passadas permanecem anônimas no mapa.
+          </p>
+          <div class="flex gap-2">
+            <input type="password" id="senha-excluir-conta" placeholder="Confirme sua senha" class="flex-1 border border-red-300 rounded-lg px-3 py-1.5" />
+            <button onclick="excluirMinhaContaLGPD()" class="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold">
+              Anonimizar
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== SEÇÃO 5: PAINEL DO GESTOR ==================== -->
+    <section id="sec-gestao" class="hidden flex-col gap-4">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">Painel de Gestão Municipal</h2>
+          <p class="text-xs text-slate-500">Fila priorizada por severidade, Triagem da IA (YOLO11n) e análise de sinalizações.</p>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <select id="gestao-filtro-area" onchange="recarregarPainelGestao()" class="hidden border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="">Todas as Cidades (Admin)</option>
+          </select>
+          <button onclick="recarregarPainelGestao()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold">
+            Atualizar Painel
+          </button>
+        </div>
+      </div>
+
+      <!-- Cards de Resumo -->
+      <div id="gestao-cards-resumo" class="grid grid-cols-2 sm:grid-cols-5 gap-3"></div>
+
+      <!-- Sub-abas de Gestão -->
+      <div class="flex gap-2 border-b border-slate-200 text-xs sm:text-sm font-semibold">
+        <button onclick="alternarSubAbaGestao('fila')" id="subtab-gestao-fila" class="px-4 py-2 border-b-2 border-emerald-600 text-emerald-700">
+          Fila de Ocorrências
+        </button>
+        <button onclick="alternarSubAbaGestao('triagem')" id="subtab-gestao-triagem" class="px-4 py-2 text-slate-600 hover:text-slate-900">
+          Fila de Triagem IA
+        </button>
+        <button onclick="alternarSubAbaGestao('sinalizacoes')" id="subtab-gestao-sinalizacoes" class="px-4 py-2 text-slate-600 hover:text-slate-900">
+          Sinalizações de Cidadãos
+        </button>
+      </div>
+
+      <!-- Sub-aba 1: Fila de Ocorrências -->
+      <div id="gestao-view-fila" class="space-y-3">
+        <div class="flex flex-wrap gap-2 text-xs bg-white p-3 rounded-lg border border-slate-200">
+          <select id="gestao-status" onchange="carregarFilaGestao()" class="border rounded px-2 py-1">
+            <option value="aberta">Status: Abertas</option>
+            <option value="resolvida">Status: Resolvidas</option>
+            <option value="descartada">Status: Descartadas</option>
+            <option value="duplicada">Status: Duplicadas</option>
+            <option value="todas">Todos os Status</option>
+          </select>
+          <select id="gestao-gravidade" onchange="carregarFilaGestao()" class="border rounded px-2 py-1">
+            <option value="">Todas as Gravidades</option>
+            <option value="grave">Grave</option>
+            <option value="moderado">Moderado</option>
+            <option value="leve">Leve</option>
+          </select>
+          <select id="gestao-ordem" onchange="carregarFilaGestao()" class="border rounded px-2 py-1">
+            <option value="prioridade">Ordenar: Maior Prioridade / Gravidade</option>
+            <option value="recentes">Mais Recentes</option>
+            <option value="antigas">Mais Antigas</option>
+          </select>
+        </div>
+        <div id="tabela-gestao-ocorrencias" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto"></div>
+      </div>
+
+      <!-- Sub-aba 2: Fila de Triagem IA -->
+      <div id="gestao-view-triagem" class="hidden space-y-3">
+        <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg text-xs text-amber-900">
+          Ocorrências abaixo tiveram confiança intermediária na IA (entre 25% e 50%) ou foto enviada da galeria do celular. Inspecione a foto para aprovar ou recusar.
+        </div>
+        <div id="lista-gestao-triagem" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+      </div>
+
+      <!-- Sub-aba 3: Sinalizações -->
+      <div id="gestao-view-sinalizacoes" class="hidden space-y-3">
+        <div id="lista-gestao-sinalizacoes" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto"></div>
+      </div>
+    </section>
+
+    <!-- ==================== SEÇÃO 6: PAINEL DO ADMIN ==================== -->
+    <section id="sec-admin" class="hidden flex-col gap-5">
+      <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+        <h2 class="text-lg font-bold text-slate-900">Administração da Plataforma</h2>
+        <p class="text-xs text-slate-500">Operações executadas com conexão segregada de banco de dados (<code>pavimentai_admin</code>).</p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Cadastrar Cidade via IBGE + Mapa de Prévia -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3 text-xs">
+          <h3 class="font-bold text-sm text-slate-800 border-b pb-2">1. Cadastrar Novo Município (Malha Oficial IBGE)</h3>
+          <div class="flex flex-wrap gap-2">
+            <input type="text" id="admin-uf" value="SP" maxlength="2" class="w-16 border rounded px-2 py-1.5 uppercase text-center font-bold" />
+            <input type="text" id="admin-busca-mun" placeholder="Nome da cidade (ex: Mauá)" class="flex-1 border rounded px-3 py-1.5" />
+            <button onclick="buscarMunicipioIBGE()" class="px-3 py-1.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-semibold">
+              Buscar no IBGE
+            </button>
+          </div>
+          <div id="admin-resultados-ibge" class="space-y-1 max-h-40 overflow-y-auto"></div>
+          <div id="admin-box-previa" class="hidden space-y-2 pt-2 border-t">
+            <div class="flex items-center justify-between">
+              <span id="admin-previa-titulo" class="font-bold text-purple-900"></span>
+              <label class="flex items-center gap-1.5 font-medium cursor-pointer">
+                <input type="checkbox" id="admin-nova-exige-res" />
+                Exigir residência local (CEP)
+              </label>
+            </div>
+            <div id="mapa-previa-admin" class="w-full h-48 rounded-lg border border-slate-300"></div>
+            <button onclick="confirmarCadastroAreaIBGE()" class="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold">
+              Confirmar e Importar Limite Oficial do IBGE
+            </button>
+          </div>
+        </div>
+
+        <!-- Cidades Cadastradas -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3 text-xs">
+          <div class="flex items-center justify-between border-b pb-2">
+            <h3 class="font-bold text-sm text-slate-800">2. Municípios Cadastrados</h3>
+            <button onclick="carregarAdminAreas()" class="text-purple-600 font-semibold">Atualizar</button>
+          </div>
+          <div id="admin-lista-areas" class="space-y-2 max-h-80 overflow-y-auto"></div>
+        </div>
+
+        <!-- Gestão de Usuários e Papéis -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3 text-xs">
+          <h3 class="font-bold text-sm text-slate-800 border-b pb-2">3. Usuários &amp; Promoção de Gestores</h3>
+          <div class="flex gap-2">
+            <input type="text" id="admin-busca-usuario" placeholder="Buscar por nome ou e-mail..." class="flex-1 border rounded px-3 py-1.5" />
+            <button onclick="carregarAdminUsuarios()" class="px-3 py-1.5 rounded bg-slate-800 text-white font-semibold">
+              Buscar
+            </button>
+          </div>
+          <div id="admin-lista-usuarios" class="space-y-2 max-h-72 overflow-y-auto"></div>
+        </div>
+
+        <!-- Catálogo de Tipos de Ocorrência -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3 text-xs">
+          <h3 class="font-bold text-sm text-slate-800 border-b pb-2">4. Catálogo de Tipos de Ocorrência</h3>
+          <form onsubmit="criarNovoTipoAdmin(event)" class="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg border">
+            <input type="text" id="tipo-novo-codigo" required pattern="^[a-z][a-z0-9_]{1,19}$" placeholder="código (ex: bueiro)" class="border rounded px-2 py-1" />
+            <input type="text" id="tipo-novo-nome" required placeholder="Nome (ex: Bueiro aberto)" class="border rounded px-2 py-1" />
+            <input type="text" id="tipo-novo-cats" placeholder="Categorias sep. por vírgula (opcional)" class="col-span-2 border rounded px-2 py-1" />
+            <label class="flex items-center gap-1.5">
+              <input type="checkbox" id="tipo-novo-grav" /> Usa gravidade
+            </label>
+            <button type="submit" class="px-3 py-1 rounded bg-purple-600 text-white font-bold justify-self-end">
+              + Criar Tipo
+            </button>
+          </form>
+          <div id="admin-lista-tipos" class="space-y-1.5 max-h-56 overflow-y-auto"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== MODAL DE DETALHES DA OCORRÊNCIA (PÚBLICO / GESTOR) ==================== -->
+  <div id="modal-ocorrencia" class="hidden fixed inset-0 z-50 bg-slate-950/70 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-3xl w-full p-5 shadow-xl space-y-4 max-h-[92vh] overflow-y-auto text-xs sm:text-sm">
+      <div class="flex items-start justify-between border-b pb-3">
+        <div>
+          <span id="mod-occ-badges" class="flex flex-wrap gap-1.5 mb-1"></span>
+          <h3 id="mod-occ-titulo" class="text-base sm:text-lg font-bold text-slate-900">Ocorrência</h3>
+          <p id="mod-occ-sub" class="text-xs text-slate-500"></p>
+        </div>
+        <button onclick="fecharModalOcorrencia()" class="text-slate-400 hover:text-slate-700 text-xl font-bold px-2">&times;</button>
+      </div>
+
+      <p id="mod-occ-desc" class="text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200"></p>
+
+      <!-- Galeria de Fotos com Overlay das Bounding Boxes da IA -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <h4 class="font-bold text-slate-800">Fotos &amp; Inspeção Visual IA</h4>
+          <label id="btn-anexar-mais-foto" class="hidden cursor-pointer px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs">
+            + Anexar Foto
+            <input type="file" accept="image/jpeg,image/png,image/webp" onchange="anexarFotoExtraModal(event)" class="hidden" />
+          </label>
+        </div>
+        <div id="mod-occ-fotos" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+      </div>
+
+      <!-- Ações do Cidadão: Sinalizar Ocorrência -->
+      <div id="mod-box-sinalizar" class="hidden bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+        <h4 class="font-bold text-slate-700 text-xs uppercase">Sinalizar Problema nesta Ocorrência</h4>
+        <div class="flex flex-wrap gap-2">
+          <select id="sin-motivo" onchange="alternarCampoOriginalSinalizacao()" class="border rounded px-2 py-1 text-xs bg-white">
+            <option value="nao_e_um_problema">Não é um problema real</option>
+            <option value="localizacao_incorreta">Localização incorreta</option>
+            <option value="informacao_incorreta">Informação incorreta</option>
+            <option value="duplicidade">Duplicada de outra ocorrência</option>
+            <option value="outro">Outro motivo</option>
+          </select>
+          <input type="number" id="sin-id-original" placeholder="ID da original" class="hidden w-28 border rounded px-2 py-1 text-xs" />
+          <input type="text" id="sin-descricao" placeholder="Observação opcional..." class="flex-1 border rounded px-2 py-1 text-xs" />
+          <button onclick="enviarSinalizacaoCidadao()" class="px-3 py-1 rounded bg-slate-800 text-white text-xs font-semibold">
+            Enviar Aviso
+          </button>
+        </div>
+      </div>
+
+      <!-- Ações Exclusivas do Gestor / Admin -->
+      <div id="mod-box-gestor" class="hidden bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 space-y-3">
+        <h4 class="font-bold text-emerald-950 text-xs uppercase tracking-wider">Ações de Gestão Municipal</h4>
+
+        <!-- Decisão de Triagem IA (se aplicável) -->
+        <div id="mod-gestor-triagem-box" class="hidden bg-amber-100/80 p-3 rounded-lg border border-amber-300 space-y-2">
+          <p class="font-bold text-amber-950 text-xs">Esta ocorrência aguarda decisão na Fila de Triagem da IA:</p>
+          <div class="flex flex-wrap gap-2 items-center">
+            <select id="triagem-gravidade" class="border rounded px-2 py-1 text-xs bg-white">
+              <option value="">Manter gravidade atual</option>
+              <option value="leve">Confirmar: Leve</option>
+              <option value="moderado">Confirmar: Moderado</option>
+              <option value="grave">Confirmar: Grave</option>
+            </select>
+            <button onclick="executarDecisaoTriagem('aprovada')" class="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-bold">
+              Aprovar na Triagem
+            </button>
+            <input type="text" id="triagem-motivo-recusa" placeholder="Motivo se recusar (mín. 5 letras)" class="flex-1 border rounded px-2 py-1 text-xs bg-white" />
+            <button onclick="executarDecisaoTriagem('recusada')" class="px-3 py-1 rounded bg-red-600 text-white text-xs font-bold">
+              Recusar Foto/Ocorrência
+            </button>
+          </div>
+        </div>
+
+        <!-- Alterar Status / Confirmar Gravidade -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+          <div>
+            <label class="font-semibold block mb-1">Novo Status</label>
+            <select id="gestor-novo-status" class="w-full border rounded px-2 py-1.5 bg-white">
+              <option value="aberta">Aberta (Reabrir / Manter)</option>
+              <option value="resolvida">Resolvida (Tapa-buraco concluído)</option>
+              <option value="descartada">Descartada</option>
+              <option value="duplicada">Duplicada</option>
+            </select>
+          </div>
+          <div>
+            <label class="font-semibold block mb-1">Gravidade Verificada</label>
+            <select id="gestor-nova-grav" class="w-full border rounded px-2 py-1.5 bg-white">
+              <option value="">Não alterar</option>
+              <option value="leve">Leve</option>
+              <option value="moderado">Moderado</option>
+              <option value="grave">Grave</option>
+            </select>
+          </div>
+          <div>
+            <label class="font-semibold block mb-1">ID Principal (só se duplicada)</label>
+            <input type="number" id="gestor-id-principal" placeholder="Ex: 12" class="w-full border rounded px-2 py-1.5 bg-white" />
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <input type="text" id="gestor-justificativa" placeholder="Justificativa / despacho da equipe (obrigatório ao descartar)" class="flex-1 border rounded px-3 py-1.5 text-xs bg-white" />
+          <button onclick="salvarMudancaStatusGestor()" class="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs">
+            Salvar Despacho
+          </button>
+        </div>
+
+        <!-- Histórico de Status -->
+        <div id="mod-occ-historico" class="pt-2 border-t border-emerald-200 text-xs space-y-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL DE AUTENTICAÇÃO (LOGIN / CADASTRO / VERIFICAÇÃO / SENHA) ==================== -->
+  <div id="modal-auth" class="hidden fixed inset-0 z-50 bg-slate-950/70 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4 text-sm">
+      <div class="flex items-center justify-between border-b pb-2">
+        <h3 id="auth-modal-titulo" class="text-lg font-bold text-slate-900">Entrar</h3>
+        <button onclick="fecharModalAuth()" class="text-slate-400 hover:text-slate-700 text-xl font-bold">&times;</button>
+      </div>
+
+      <!-- Formulário Login -->
+      <form id="form-login" onsubmit="fazerLogin(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">E-mail</label>
+          <input type="email" id="login-email" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Senha</label>
+          <input type="password" id="login-senha" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold">
+          Entrar na Plataforma
+        </button>
+        <div class="flex justify-between text-xs text-slate-500 pt-1">
+          <button type="button" onclick="abrirModalAuth('esqueci')" class="hover:underline">Esqueci minha senha</button>
+          <button type="button" onclick="abrirModalAuth('verificar')" class="hover:underline">Tenho um código de e-mail</button>
+        </div>
+      </form>
+
+      <!-- Formulário Cadastro -->
+      <form id="form-cadastro" onsubmit="fazerCadastro(event)" class="hidden space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Completo</label>
+          <input type="text" id="cad-nome" required minlength="2" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">E-mail</label>
+          <input type="email" id="cad-email" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Telefone (DDD + Número)</label>
+          <input type="text" id="cad-tel" required placeholder="11999998888" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Senha (mínimo 8 caracteres)</label>
+          <input type="password" id="cad-senha" required minlength="8" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold">
+          Cadastrar e Receber Código
+        </button>
+      </form>
+
+      <!-- Formulário Verificar E-mail (6 dígitos) -->
+      <form id="form-verificar" onsubmit="fazerVerificacaoEmail(event)" class="hidden space-y-3">
+        <p class="text-xs text-slate-600">Digite o código de 6 dígitos enviado para o seu e-mail (em modo <code>dev</code>, veja no terminal da API).</p>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">E-mail</label>
+          <input type="email" id="verif-email" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Código de 6 dígitos</label>
+          <input type="text" id="verif-codigo" required pattern="^\d{6}$" maxlength="6" placeholder="123456" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-center font-mono text-lg tracking-widest" />
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold">
+          Confirmar E-mail
+        </button>
+        <button type="button" onclick="reenviarCodigoVerificacao()" class="w-full py-1.5 text-xs text-slate-600 hover:underline">
+          Reenviar código
+        </button>
+      </form>
+
+      <!-- Formulário Esqueci / Redefinir Senha -->
+      <form id="form-esqueci" onsubmit="fazerRedefinicaoSenha(event)" class="hidden space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Seu E-mail</label>
+          <div class="flex gap-2">
+            <input type="email" id="esq-email" required class="flex-1 border border-slate-300 rounded-lg px-3 py-2" />
+            <button type="button" onclick="pedirCodigoRecuperacao()" class="px-3 py-2 rounded-lg bg-slate-800 text-white text-xs font-semibold">
+              Enviar Código
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Código Recebido (6 dígitos)</label>
+          <input type="text" id="esq-codigo" required pattern="^\d{6}$" maxlength="6" class="w-full border border-slate-300 rounded-lg px-3 py-2 font-mono text-center" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Nova Senha (mín. 8 caracteres)</label>
+          <input type="password" id="esq-nova-senha" required minlength="8" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <button type="submit" class="w-full py-2.5 rounded-lg bg-amber-500 text-slate-950 font-bold">
+          Salvar Nova Senha
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- SCRIPT PRINCIPAL DA APLICAÇÃO (SPA) -->
+  <script>
+    // Detecta automaticamente se está rodando sob /web na própria API FastAPI ou em porta externa
+    const API_BASE = window.location.pathname.startsWith('/web')
+      ? window.location.origin
+      : (localStorage.getItem('PAVIMENTAI_API_URL') || 'http://127.0.0.1:8000');
+
+    let tokenJWT = localStorage.getItem('PAVIMENTAI_TOKEN') || null;
+    let usuarioLogado = null;
+    let catalogoTipos = [];
+    let areasAtendidas = [];
+    let ocorrenciaAbertaModalId = null;
+
+    // Instâncias Leaflet
+    let mapa = null;
+    let camadaAreasGeoJSON = null;
+    let camadaMarcadores = null;
+    let marcadorSelecao = null;
+    let mapaPreviaAdmin = null;
+    let camadaPreviaAdmin = null;
+    let codigoIbgePreviaAtual = null;
+
+    // -------------------- UTILITÁRIOS DE REDE E UI --------------------
+    function toast(msg, tipo = 'info') {
+      const cores = {
+        info: 'bg-slate-900 text-white border-slate-700',
+        sucesso: 'bg-emerald-700 text-white border-emerald-500',
+        erro: 'bg-red-700 text-white border-red-500',
+        aviso: 'bg-amber-500 text-slate-950 border-amber-600 font-semibold'
+      };
+      const el = document.createElement('div');
+      el.className = `pointer-events-auto p-3.5 rounded-xl shadow-lg border text-xs sm:text-sm transition-all ${cores[tipo] || cores.info}`;
+      el.textContent = msg;
+      document.getElementById('toast-container').appendChild(el);
+      setTimeout(() => el.remove(), 4800);
+    }
+
+    function escaparHTML(str) {
+      if (str === null || str === undefined) return '';
+      return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    }
+
+    async function api(caminho, opcoes = {}) {
+      const headers = { ...(opcoes.headers || {}) };
+      if (tokenJWT) headers['Authorization'] = `Bearer ${tokenJWT}`;
+      if (opcoes.json) {
+        headers['Content-Type'] = 'application/json';
+        opcoes.body = JSON.stringify(opcoes.json);
+      }
+      const resp = await fetch(`${API_BASE}${caminho}`, { ...opcoes, headers });
+      let dados = null;
+      const contentType = resp.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        dados = await resp.json();
+      }
+      if (!resp.ok) {
+        const detalhe = dados?.detail;
+        const msg = typeof detalhe === 'string'
+          ? detalhe
+          : (detalhe?.mensagem || (Array.isArray(detalhe) ? detalhe.map(d => d.msg).join(', ') : `Erro HTTP ${resp.status}`));
+        const err = new Error(msg);
+        err.status = resp.status;
+        err.detail = detalhe;
+        throw err;
+      }
+      return dados;
+    }
+
+    function badgeGravidade(g) {
+      const mapaCores = {
+        grave: 'bg-red-100 text-red-800 border-red-300',
+        moderado: 'bg-amber-100 text-amber-800 border-amber-300',
+        leve: 'bg-emerald-100 text-emerald-800 border-emerald-300'
+      };
+      if (!g) return '<span class="px-2 py-0.5 text-[11px] rounded border bg-slate-100 text-slate-600">Sem gravidade</span>';
+      return `<span class="px-2 py-0.5 text-[11px] rounded border font-bold uppercase ${mapaCores[g] || ''}">${escaparHTML(g)}</span>`;
+    }
+
+    function badgeStatus(st) {
+      const cores = {
+        aberta: 'bg-blue-100 text-blue-800',
+        resolvida: 'bg-emerald-100 text-emerald-800',
+        descartada: 'bg-slate-200 text-slate-700',
+        duplicada: 'bg-purple-100 text-purple-800'
+      };
+      return `<span class="px-2 py-0.5 text-[11px] rounded font-semibold uppercase ${cores[st] || 'bg-slate-100'}">${escaparHTML(st)}</span>`;
+    }
+
+    // -------------------- NAVEGAÇÃO ENTRE ABAS --------------------
+    function navegar(aba) {
+      const abas = ['mapa', 'nova', 'minhas', 'perfil', 'gestao', 'admin'];
+      abas.forEach(a => {
+        const sec = document.getElementById(`sec-${a}`);
+        if (sec) sec.classList.toggle('hidden', a !== aba);
+        const tab = document.getElementById(`tab-${a}`);
+        if (tab) {
+          if (a === aba) {
+            tab.classList.add('bg-amber-500', 'text-slate-950', 'font-bold');
+          } else {
+            tab.classList.remove('bg-amber-500', 'text-slate-950', 'font-bold');
+          }
+        }
+      });
+
+      if (aba === 'mapa' && mapa) setTimeout(() => mapa.invalidateSize(), 100);
+      if (aba === 'minhas') carregarMinhasOcorrencias();
+      if (aba === 'perfil') renderizarResumoPerfil();
+      if (aba === 'gestao') recarregarPainelGestao();
+      if (aba === 'admin') {
+        carregarAdminAreas();
+        carregarAdminUsuarios();
+        carregarAdminTipos();
+      }
+    }
+
+    // -------------------- MAPA INTERATIVO LEAFLET --------------------
+    function inicializarMapa() {
+      // Centro inicial: Região de Ribeirão Pires / Mauá (ABC Paulista)
+      mapa = L.map('mapa-principal').setView([-23.705, -46.415], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(mapa);
+
+      camadaAreasGeoJSON = L.layerGroup().addTo(mapa);
+      camadaMarcadores = L.layerGroup().addTo(mapa);
+
+      mapa.on('moveend', () => carregarMapaOcorrencias());
+      mapa.on('click', (e) => {
+        const { lat, lng } = e.latlng;
+        document.getElementById('occ-lat').value = lat.toFixed(6);
+        document.getElementById('occ-lon').value = lng.toFixed(6);
+        if (marcadorSelecao) mapa.removeLayer(marcadorSelecao);
+        marcadorSelecao = L.marker([lat, lng]).addTo(mapa)
+          .bindPopup(`<div class="text-xs space-y-1"><b>Ponto selecionado</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}<br><button onclick="acionarNovaOcorrenciaDoMapa()" class="mt-1 px-2 py-1 bg-amber-500 text-slate-950 font-bold rounded">Reportar aqui</button></div>`)
+          .openPopup();
+      });
+    }
+
+    async function carregarAreasETiposIniciais() {
+      try {
+        const [geoAreas, tipos] = await Promise.all([
+          api('/areas'),
+          api('/ocorrencias/tipos')
+        ]);
+        catalogoTipos = tipos || [];
+        areasAtendidas = geoAreas.features || [];
+
+        // Preenche selects de áreas
+        const selMapaArea = document.getElementById('filtro-mapa-area');
+        const selGestaoArea = document.getElementById('gestao-filtro-area');
+        selMapaArea.innerHTML = '<option value="">Todas as áreas atendidas</option>';
+        selGestaoArea.innerHTML = '<option value="">Todas as Cidades (Admin)</option>';
+
+        camadaAreasGeoJSON.clearLayers();
+        const grupoBounds = L.featureGroup();
+
+        areasAtendidas.forEach(feat => {
+          const p = feat.properties;
+          selMapaArea.innerHTML += `<option value="${p.id_area}">${escaparHTML(p.nome)}</option>`;
+          selGestaoArea.innerHTML += `<option value="${p.id_area}">${escaparHTML(p.nome)}</option>`;
+
+          const poly = L.geoJSON(feat, {
+            style: { color: '#0f172a', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.05, dashArray: '5, 5' }
+          }).addTo(camadaAreasGeoJSON);
+          grupoBounds.addLayer(poly);
+        });
+
+        if (areasAtendidas.length > 0) {
+          mapa.fitBounds(grupoBounds.getBounds(), { padding: [20, 20] });
+        }
+
+        // Preenche selects de tipos
+        const selMapaTipo = document.getElementById('filtro-mapa-tipo');
+        const selOccTipo = document.getElementById('occ-tipo');
+        selMapaTipo.innerHTML = '<option value="">Todos</option>';
+        selOccTipo.innerHTML = '';
+        catalogoTipos.forEach(t => {
+          selMapaTipo.innerHTML += `<option value="${t.codigo}">${escaparHTML(t.nome)}</option>`;
+          selOccTipo.innerHTML += `<option value="${t.codigo}">${escaparHTML(t.nome)}</option>`;
+        });
+        atualizarFormularioTipo();
+        await carregarMapaOcorrencias();
+      } catch (e) {
+        toast(`Erro ao carregar dados iniciais: ${e.message}`, 'erro');
+      }
+    }
+
+    function centralizarAreaSelecionada() {
+      const idArea = document.getElementById('filtro-mapa-area').value;
+      if (idArea) {
+        const feat = areasAtendidas.find(f => String(f.properties.id_area) === String(idArea));
+        if (feat) {
+          const layer = L.geoJSON(feat);
+          mapa.fitBounds(layer.getBounds(), { padding: [20, 20] });
+        }
+      }
+      carregarMapaOcorrencias();
+    }
+
+    function iconePorGravidade(gravidade, tipo) {
+      let cor = '#2563eb'; // azul padrão (acessibilidade/outros)
+      if (gravidade === 'grave') cor = '#dc2626';
+      else if (gravidade === 'moderado') cor = '#f59e0b';
+      else if (gravidade === 'leve') cor = '#059669';
+      else if (tipo === 'buraco') cor = '#d97706';
+
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color:${cor};" class="marker-pin"></div>`,
+        iconSize: [24, 34],
+        iconAnchor: [12, 34]
+      });
+    }
+
+    async function carregarMapaOcorrencias() {
+      if (!mapa) return;
+      const b = mapa.getBounds();
+      const params = new URLSearchParams({
+        lat_min: Math.max(-90, b.getSouth()).toFixed(6),
+        lat_max: Math.min(90, b.getNorth()).toFixed(6),
+        lon_min: Math.max(-180, b.getWest()).toFixed(6),
+        lon_max: Math.min(180, b.getEast()).toFixed(6),
+        verificacao: document.getElementById('filtro-mapa-verif').value
+      });
+      const idArea = document.getElementById('filtro-mapa-area').value;
+      const tipo = document.getElementById('filtro-mapa-tipo').value;
+      if (idArea) params.set('id_area', idArea);
+      if (tipo) params.set('tipo', tipo);
+
+      try {
+        const geo = await api(`/ocorrencias/mapa?${params.toString()}`);
+        camadaMarcadores.clearLayers();
+        (geo.features || []).forEach(f => {
+          const [lon, lat] = f.geometry.coordinates;
+          const p = f.properties;
+          const marker = L.marker([lat, lon], { icon: iconePorGravidade(p.gravidade, p.tipo) });
+          marker.on('click', () => abrirModalOcorrencia(p.id_ocorrencia));
+          marker.addTo(camadaMarcadores);
+        });
+      } catch (e) {
+        // Ignora erro 422 quando o zoom estiver muito distante (>10 graus)
+      }
+    }
+
+    // -------------------- AUTENTICAÇÃO E SESSÃO --------------------
+    function abrirModalAuth(modo) {
+      document.getElementById('modal-auth').classList.remove('hidden');
+      const titulos = {
+        login: 'Entrar no PavimentAI',
+        cadastro: 'Criar Conta de Cidadão',
+        verificar: 'Confirmar Código de E-mail',
+        esqueci: 'Recuperar / Redefinir Senha'
+      };
+      document.getElementById('auth-modal-titulo').textContent = titulos[modo] || 'Autenticação';
+      ['login', 'cadastro', 'verificar', 'esqueci'].forEach(m => {
+        document.getElementById(`form-${m}`).classList.toggle('hidden', m !== modo);
+      });
+    }
+
+    function fecharModalAuth() {
+      document.getElementById('modal-auth').classList.add('hidden');
+    }
+
+    async function carregarUsuarioAtual() {
+      if (!tokenJWT) {
+        atualizarMenuSessao(null);
+        return;
+      }
+      try {
+        const u = await api('/auth/eu');
+        atualizarMenuSessao(u);
+      } catch (e) {
+        tokenJWT = null;
+        localStorage.removeItem('PAVIMENTAI_TOKEN');
+        atualizarMenuSessao(null);
+      }
+    }
+
+    function atualizarMenuSessao(u) {
+      usuarioLogado = u;
+      const logOut = document.getElementById('user-logged-out');
+      const logIn = document.getElementById('user-logged-in');
+      const tabNova = document.getElementById('tab-nova');
+      const tabMinhas = document.getElementById('tab-minhas');
+      const tabGestao = document.getElementById('tab-gestao');
+      const tabAdmin = document.getElementById('tab-admin');
+
+      if (!u) {
+        logOut.classList.remove('hidden');
+        logIn.classList.add('hidden');
+        tabNova.classList.add('hidden');
+        tabMinhas.classList.add('hidden');
+        tabGestao.classList.add('hidden');
+        tabAdmin.classList.add('hidden');
+        return;
+      }
+
+      logOut.classList.add('hidden');
+      logIn.classList.remove('hidden');
+      document.getElementById('nav-user-nome').textContent = u.nome;
+      document.getElementById('nav-user-papel').textContent = u.papel;
+
+      tabNova.classList.remove('hidden');
+      tabMinhas.classList.remove('hidden');
+      tabGestao.classList.toggle('hidden', !['gestor', 'admin'].includes(u.papel));
+      tabAdmin.classList.toggle('hidden', u.papel !== 'admin');
+      document.getElementById('gestao-filtro-area').classList.toggle('hidden', u.papel !== 'admin');
+    }
+
+    async function fazerLogin(e) {
+      e.preventDefault();
+      const body = new URLSearchParams({
+        username: document.getElementById('login-email').value.trim(),
+        password: document.getElementById('login-senha').value
+      });
+      try {
+        const res = await api('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body
+        });
+        tokenJWT = res.access_token;
+        localStorage.setItem('PAVIMENTAI_TOKEN', tokenJWT);
+        fecharModalAuth();
+        await carregarUsuarioAtual();
+        toast('Sessão iniciada com sucesso!', 'sucesso');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function fazerCadastro(e) {
+      e.preventDefault();
+      const email = document.getElementById('cad-email').value.trim();
+      try {
+        const res = await api('/auth/cadastro', {
+          method: 'POST',
+          json: {
+            nome: document.getElementById('cad-nome').value.trim(),
+            email,
+            telefone: document.getElementById('cad-tel').value.trim(),
+            senha: document.getElementById('cad-senha').value
+          }
+        });
+        toast(res.mensagem, 'sucesso');
+        document.getElementById('verif-email').value = email;
+        abrirModalAuth('verificar');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function fazerVerificacaoEmail(e) {
+      e.preventDefault();
+      const email = document.getElementById('verif-email').value.trim();
+      try {
+        const res = await api('/auth/verificar-email', {
+          method: 'POST',
+          json: {
+            email,
+            codigo: document.getElementById('verif-codigo').value.trim()
+          }
+        });
+        toast(res.mensagem, 'sucesso');
+        document.getElementById('login-email').value = email;
+        abrirModalAuth('login');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function reenviarCodigoVerificacao() {
+      const email = document.getElementById('verif-email').value.trim();
+      if (!email) return toast('Preencha o seu e-mail acima primeiro.', 'aviso');
+      try {
+        const res = await api('/auth/reenviar-codigo', { method: 'POST', json: { email } });
+        toast(res.mensagem, 'sucesso');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function pedirCodigoRecuperacao() {
+      const email = document.getElementById('esq-email').value.trim();
+      if (!email) return toast('Informe seu e-mail primeiro.', 'aviso');
+      try {
+        const res = await api('/auth/esqueci-senha', { method: 'POST', json: { email } });
+        toast(res.mensagem, 'sucesso');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function fazerRedefinicaoSenha(e) {
+      e.preventDefault();
+      try {
+        const res = await api('/auth/redefinir-senha', {
+          method: 'POST',
+          json: {
+            email: document.getElementById('esq-email').value.trim(),
+            codigo: document.getElementById('esq-codigo').value.trim(),
+            senha_nova: document.getElementById('esq-nova-senha').value
+          }
+        });
+        toast(res.mensagem, 'sucesso');
+        abrirModalAuth('login');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    function logout() {
+      tokenJWT = null;
+      localStorage.removeItem('PAVIMENTAI_TOKEN');
+      atualizarMenuSessao(null);
+      navegar('mapa');
+      toast('Você saiu da sua conta.');
+    }
+
+    // -------------------- COMPRESSÃO DE IMAGEM EM CANVAS (CLIENT-SIDE) --------------------
+    async function comprimirImagemCamera(file, maxLado = 1920, qualidade = 0.85) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let { width, height } = img;
+          if (width > maxLado || height > maxLado) {
+            if (width > height) {
+              height = Math.round((height * maxLado) / width);
+              width = maxLado;
+            } else {
+              width = Math.round((width * maxLado) / height);
+              height = maxLado;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            if (!blob) return resolve(file);
+            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+          }, 'image/jpeg', qualidade);
+        };
+        img.onerror = () => resolve(file);
+        img.src = url;
+      });
+    }
+
+    // -------------------- CRIAÇÃO DE OCORRÊNCIA E UPLOAD DE FOTO --------------------
+    function acionarNovaOcorrenciaDoMapa() {
+      if (!usuarioLogado) {
+        toast('Entre na sua conta para registrar uma ocorrência.', 'aviso');
+        abrirModalAuth('login');
+        return;
+      }
+      if (!document.getElementById('occ-lat').value && mapa) {
+        const c = mapa.getCenter();
+        document.getElementById('occ-lat').value = c.lat.toFixed(6);
+        document.getElementById('occ-lon').value = c.lng.toFixed(6);
+      }
+      navegar('nova');
+    }
+
+    function atualizarFormularioTipo() {
+      const cod = document.getElementById('occ-tipo').value;
+      const t = catalogoTipos.find(x => x.codigo === cod);
+      const wrapCat = document.getElementById('wrap-occ-categoria');
+      const selCat = document.getElementById('occ-categoria');
+      const wrapGrav = document.getElementById('wrap-occ-gravidade');
+
+      if (t && t.categorias && t.categorias.length > 0) {
+        wrapCat.classList.remove('hidden');
+        selCat.innerHTML = t.categorias.map(c => `<option value="${c}">${escaparHTML(c)}</option>`).join('');
+      } else {
+        wrapCat.classList.add('hidden');
+        selCat.innerHTML = '';
+      }
+
+      if (t && t.usa_gravidade) {
+        wrapGrav.classList.remove('hidden');
+      } else {
+        wrapGrav.classList.add('hidden');
+        document.getElementById('occ-gravidade').value = '';
+      }
+    }
+
+    function alternarModoCapturaFoto() {
+      const fonte = document.querySelector('input[name="occ-fonte-foto"]:checked').value;
+      const input = document.getElementById('occ-arquivo-foto');
+      if (fonte === 'camera') input.setAttribute('capture', 'environment');
+      else input.removeAttribute('capture');
+    }
+
+    function obterGPSAtual() {
+      if (!navigator.geolocation) return toast('Seu navegador não suporta geolocalização.', 'erro');
+      toast('Obtendo coordenadas do GPS...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          document.getElementById('occ-lat').value = pos.coords.latitude.toFixed(6);
+          document.getElementById('occ-lon').value = pos.coords.longitude.toFixed(6);
+          toast(`GPS capturado (precisão: ~${Math.round(pos.coords.accuracy)}m)`, 'sucesso');
+        },
+        () => toast('Não foi possível obter o GPS. Permita o acesso ou clique no mapa.', 'erro'),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+
+    async function submeterOcorrencia(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn-submit-occ');
+      btn.disabled = true;
+
+      const codTipo = document.getElementById('occ-tipo').value;
+      const infoTipo = catalogoTipos.find(x => x.codigo === codTipo);
+      const lat = parseFloat(document.getElementById('occ-lat').value);
+      const lon = parseFloat(document.getElementById('occ-lon').value);
+      const forcar = document.getElementById('occ-forcar-duplicada').checked;
+
+      const payload = {
+        tipo: codTipo,
+        categoria: (infoTipo?.categorias?.length > 0) ? document.getElementById('occ-categoria').value : null,
+        descricao: document.getElementById('occ-descricao').value.trim() || null,
+        gravidade: (infoTipo?.usa_gravidade && document.getElementById('occ-gravidade').value) ? document.getElementById('occ-gravidade').value : null,
+        latitude: lat,
+        longitude: lon,
+        criar_mesmo_assim: forcar
+      };
+
+      try {
+        const occ = await api('/ocorrencias', { method: 'POST', json: payload });
+        document.getElementById('box-duplicidade-aviso').classList.add('hidden');
+        document.getElementById('occ-forcar-duplicada').checked = false;
+
+        // Se selecionou foto, envia logo em seguida
+        const inputFoto = document.getElementById('occ-arquivo-foto');
+        if (inputFoto.files && inputFoto.files[0]) {
+          const fonte = document.querySelector('input[name="occ-fonte-foto"]:checked').value;
+          toast('Enviando foto e analisando com IA (YOLO11n)...');
+          await enviarArquivoFotoOcorrencia(occ.id_ocorrencia, inputFoto.files[0], fonte, lat, lon);
+        } else {
+          toast(`Ocorrência #${occ.id_ocorrencia} registrada com sucesso!`, 'sucesso');
+        }
+
+        document.getElementById('form-ocorrencia').reset();
+        atualizarFormularioTipo();
+        navegar('mapa');
+        carregarMapaOcorrencias();
+      } catch (err) {
+        if (err.status === 409 && err.detail?.proximas) {
+          const box = document.getElementById('box-duplicidade-aviso');
+          const ul = document.getElementById('lista-duplicadas-proximas');
+          ul.innerHTML = err.detail.proximas.map(p =>
+            `<li>Ocorrência #${p.id_ocorrencia} a <b>${p.distancia_m}m</b> (${new Date(p.criado_em).toLocaleDateString('pt-BR')})</li>`
+          ).join('');
+          box.classList.remove('hidden');
+          toast('Existe uma ocorrência aberta bem próxima! Confira o aviso amarelo.', 'aviso');
+        } else {
+          toast(err.message, 'erro');
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function enviarArquivoFotoOcorrencia(idOcorrencia, fileOriginal, fonte, lat, lon) {
+      let arquivoEnvio = fileOriginal;
+      // Na câmera do app comprimir no cliente poupa 4G; na galeria preserva os bytes originais para manter EXIF
+      if (fonte === 'camera') {
+        arquivoEnvio = await comprimirImagemCamera(fileOriginal);
+      }
+      const fd = new FormData();
+      fd.append('arquivo', arquivoEnvio);
+      fd.append('fonte', fonte);
+      if (fonte === 'camera' && lat !== null && lon !== null) {
+        fd.append('latitude', String(lat));
+        fd.append('longitude', String(lon));
+      }
+      try {
+        await api(`/ocorrencias/${idOcorrencia}/fotos`, { method: 'POST', body: fd });
+        toast(`Ocorrência #${idOcorrencia} e foto validadas com sucesso!`, 'sucesso');
+      } catch (err) {
+        toast(`Ocorrência #${idOcorrencia} criada, mas a foto foi recusada: ${err.message}`, 'aviso');
+      }
+    }
+
+    // -------------------- MODAL DE DETALHES E BOUNDING BOXES IA --------------------
+    async function abrirModalOcorrencia(idOcorrencia) {
+      ocorrenciaAbertaModalId = idOcorrencia;
+      const modal = document.getElementById('modal-ocorrencia');
+      modal.classList.remove('hidden');
+
+      const ehGestorOuAdmin = usuarioLogado && ['gestor', 'admin'].includes(usuarioLogado.papel);
+      try {
+        let occ, fotos = [], deteccoes = [], historico = [];
+        if (ehGestorOuAdmin) {
+          try {
+            const det = await api(`/gestao/ocorrencias/${idOcorrencia}`);
+            occ = det;
+            fotos = det.fotos || [];
+            deteccoes = det.deteccoes_ia || [];
+            historico = det.historico || [];
+          } catch {
+            // Fallback público se for gestor de outro município olhando o mapa público
+            occ = await api(`/ocorrencias/${idOcorrencia}`);
+            fotos = await api(`/ocorrencias/${idOcorrencia}/fotos`);
+          }
+        } else {
+          [occ, fotos] = await Promise.all([
+            api(`/ocorrencias/${idOcorrencia}`),
+            api(`/ocorrencias/${idOcorrencia}/fotos`)
+          ]);
+        }
+
+        const grav = occ.gravidade || occ.gravidade_verificada || occ.gravidade_cidadao;
+        document.getElementById('mod-occ-badges').innerHTML = `
+          ${badgeStatus(occ.status)}
+          ${badgeGravidade(grav)}
+          ${occ.situacao_ia ? `<span class="px-2 py-0.5 text-[11px] rounded bg-amber-100 text-amber-900 font-semibold">IA: ${escaparHTML(occ.situacao_ia)}</span>` : ''}
+        `;
+        document.getElementById('mod-occ-titulo').textContent = `Ocorrência #${occ.id_ocorrencia} — ${occ.tipo.toUpperCase()}${occ.categoria ? ` (${occ.categoria})` : ''}`;
+        document.getElementById('mod-occ-sub').textContent = `Registrada em ${new Date(occ.criado_em).toLocaleString('pt-BR')} | Coord: ${occ.latitude.toFixed(5)}, ${occ.longitude.toFixed(5)}`;
+        document.getElementById('mod-occ-desc').textContent = occ.descricao || 'Sem descrição complementar informada.';
+
+        // Renderiza Fotos + Bounding Boxes da IA (quando disponíveis para o gestor)
+        const containerFotos = document.getElementById('mod-occ-fotos');
+        if (fotos.length === 0) {
+          containerFotos.innerHTML = '<p class="text-xs text-slate-400 italic">Nenhuma foto anexada ainda.</p>';
+        } else {
+          containerFotos.innerHTML = fotos.map(f => {
+            const caixasMidia = deteccoes.filter(d => d.id_midia === f.id_midia);
+            const overlays = caixasMidia.map(c => `
+              <div class="bbox-overlay" style="left:${(c.bbox_x * 100).toFixed(2)}%; top:${(c.bbox_y * 100).toFixed(2)}%; width:${(c.bbox_largura * 100).toFixed(2)}%; height:${(c.bbox_altura * 100).toFixed(2)}%;">
+                <span class="bbox-label">YOLO ${(c.confianca * 100).toFixed(0)}% (${escaparHTML(c.gravidade_estimada)})</span>
+              </div>
+            `).join('');
+            return `
+              <div class="relative rounded-xl overflow-hidden border border-slate-300 bg-slate-900">
+                <img src="${API_BASE}${f.url}" alt="Foto da ocorrência" class="w-full h-56 object-contain" />
+                <div class="absolute inset-0">${overlays}</div>
+              </div>
+            `;
+          }).join('');
+        }
+
+        // Botão de anexar mais fotos (criador dentro do prazo ou gestor)
+        document.getElementById('btn-anexar-mais-foto').classList.toggle(
+          'hidden',
+          !usuarioLogado || (usuarioLogado.papel === 'cidadao' && occ.status !== 'aberta')
+        );
+
+        // Caixa de sinalização para cidadãos
+        document.getElementById('mod-box-sinalizar').classList.toggle(
+          'hidden',
+          !usuarioLogado || usuarioLogado.papel !== 'cidadao' || occ.status !== 'aberta'
+        );
+
+        // Caixa de gestão para Gestor/Admin
+        const boxGestor = document.getElementById('mod-box-gestor');
+        if (ehGestorOuAdmin) {
+          boxGestor.classList.remove('hidden');
+          document.getElementById('gestor-novo-status').value = occ.status;
+          document.getElementById('gestor-nova-grav').value = occ.gravidade_verificada || '';
+          document.getElementById('gestor-id-principal').value = occ.id_ocorrencia_principal || '';
+          document.getElementById('gestor-justificativa').value = '';
+
+          const aguardandoTriagem = occ.status === 'aberta' && occ.situacao_ia === 'triagem' && !occ.triagem_decisao;
+          document.getElementById('mod-gestor-triagem-box').classList.toggle('hidden', !aguardandoTriagem);
+
+          document.getElementById('mod-occ-historico').innerHTML = historico.length
+            ? `<p class="font-bold text-emerald-950 mb-1">Histórico de Status:</p>` + historico.map(h =>
+                `<div class="text-[11px] text-slate-600">&bull; <b>${escaparHTML(h.status_novo)}</b> por ${escaparHTML(h.por || 'Sistema')} em ${new Date(h.alterado_em).toLocaleString('pt-BR')} ${h.justificativa ? `— <i>"${escaparHTML(h.justificativa)}"</i>` : ''}</div>`
+              ).join('')
+            : '';
+        } else {
+          boxGestor.classList.add('hidden');
+        }
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    function fecharModalOcorrencia() {
+      document.getElementById('modal-ocorrencia').classList.add('hidden');
+      ocorrenciaAbertaModalId = null;
+    }
+
+    async function anexarFotoExtraModal(e) {
+      const file = e.target.files?.[0];
+      if (!file || !ocorrenciaAbertaModalId) return;
+      const c = mapa ? mapa.getCenter() : { lat: -23.705, lng: -46.415 };
+      await enviarArquivoFotoOcorrencia(ocorrenciaAbertaModalId, file, 'camera', c.lat, c.lng);
+      abrirModalOcorrencia(ocorrenciaAbertaModalId);
+    }
+
+    function alternarCampoOriginalSinalizacao() {
+      const m = document.getElementById('sin-motivo').value;
+      document.getElementById('sin-id-original').classList.toggle('hidden', m !== 'duplicidade');
+    }
+
+    async function enviarSinalizacaoCidadao() {
+      const motivo = document.getElementById('sin-motivo').value;
+      const idOrig = document.getElementById('sin-id-original').value;
+      try {
+        await api(`/ocorrencias/${ocorrenciaAbertaModalId}/sinalizacoes`, {
+          method: 'POST',
+          json: {
+            motivo,
+            descricao: document.getElementById('sin-descricao').value.trim() || null,
+            id_ocorrencia_original: motivo === 'duplicidade' && idOrig ? parseInt(idOrig, 10) : null
+          }
+        });
+        toast('Sinalização enviada para análise do gestor!', 'sucesso');
+        fecharModalOcorrencia();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    // -------------------- MINHAS OCORRÊNCIAS E PERFIL --------------------
+    async function carregarMinhasOcorrencias() {
+      const box = document.getElementById('lista-minhas-ocorrencias');
+      try {
+        const itens = await api('/ocorrencias/minhas');
+        if (!itens.length) {
+          box.innerHTML = '<div class="col-span-2 bg-white p-6 rounded-xl text-center text-slate-500 text-sm">Você ainda não registrou nenhuma ocorrência.</div>';
+          return;
+        }
+        box.innerHTML = itens.map(o => `
+          <div onclick="abrirModalOcorrencia(${o.id_ocorrencia})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-amber-400 cursor-pointer transition space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-sm text-slate-900">#${o.id_ocorrencia} — ${escaparHTML(o.tipo.toUpperCase())}</span>
+              <div class="flex gap-1">${badgeStatus(o.status)} ${badgeGravidade(o.gravidade)}</div>
+            </div>
+            <p class="text-slate-600 truncate">${escaparHTML(o.descricao || 'Sem descrição')}</p>
+            <div class="text-[11px] text-slate-400 flex justify-between">
+              <span>${new Date(o.criado_em).toLocaleString('pt-BR')}</span>
+              <span>IA: ${escaparHTML(o.situacao_ia || 'pendente/sem foto')}</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    function renderizarResumoPerfil() {
+      if (!usuarioLogado) return;
+      const u = usuarioLogado;
+      document.getElementById('perfil-dados-resumo').innerHTML = `
+        <p><b>Nome:</b> ${escaparHTML(u.nome)}</p>
+        <p><b>E-mail:</b> ${escaparHTML(u.email)}</p>
+        <p><b>Telefone:</b> ${escaparHTML(u.telefone)}</p>
+        <p><b>Papel:</b> <span class="uppercase font-bold">${escaparHTML(u.papel)}</span></p>
+        <p><b>Residência:</b> ${u.residencia_informada ? `${escaparHTML(u.municipio_residencia)}/${escaparHTML(u.uf_residencia)}` : 'Não informada'}</p>
+      `;
+    }
+
+    async function preencherPreviaCEP() {
+      const cep = document.getElementById('perfil-cep').value.replace(/\D/g, '');
+      const prev = document.getElementById('perfil-cep-previa');
+      if (cep.length !== 8) return;
+      try {
+        const d = await api(`/cep/${cep}`);
+        prev.textContent = `${d.municipio}/${d.uf} ${d.bairro ? `(${d.bairro})` : ''} — ${d.atendido ? 'Município atendido!' : 'Município ainda não atendido'}`;
+      } catch (err) {
+        prev.textContent = err.message;
+      }
+    }
+
+    async function salvarResidenciaCEP(e) {
+      e.preventDefault();
+      try {
+        const u = await api('/auth/residencia', {
+          method: 'PUT',
+          json: { cep: document.getElementById('perfil-cep').value }
+        });
+        atualizarMenuSessao(u);
+        renderizarResumoPerfil();
+        toast('Residência atualizada com sucesso!', 'sucesso');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function salvarPerfilNomeTel(e) {
+      e.preventDefault();
+      const nome = document.getElementById('perfil-novo-nome').value.trim() || null;
+      const telefone = document.getElementById('perfil-novo-tel').value.trim() || null;
+      try {
+        const u = await api('/auth/me', { method: 'PATCH', json: { nome, telefone } });
+        atualizarMenuSessao(u);
+        renderizarResumoPerfil();
+        toast('Perfil atualizado!', 'sucesso');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function submeterTrocaSenha(e) {
+      e.preventDefault();
+      try {
+        const res = await api('/auth/me/senha', {
+          method: 'POST',
+          json: {
+            senha_atual: document.getElementById('senha-atual').value,
+            senha_nova: document.getElementById('senha-nova').value
+          }
+        });
+        toast(res.mensagem, 'sucesso');
+        e.target.reset();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function excluirMinhaContaLGPD() {
+      const senha = document.getElementById('senha-excluir-conta').value;
+      if (!senha) return toast('Digite sua senha para confirmar a anonimização.', 'aviso');
+      if (!confirm('Tem certeza? Esta ação apagará seus dados pessoais permanentemente e encerrará sua conta.')) return;
+      try {
+        const res = await api('/auth/me', { method: 'DELETE', json: { senha } });
+        toast(res.mensagem, 'sucesso');
+        logout();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    // -------------------- PAINEL DO GESTOR --------------------
+    function alternarSubAbaGestao(sub) {
+      ['fila', 'triagem', 'sinalizacoes'].forEach(s => {
+        document.getElementById(`gestao-view-${s}`).classList.toggle('hidden', s !== sub);
+        const btn = document.getElementById(`subtab-gestao-${s}`);
+        if (s === sub) {
+          btn.className = 'px-4 py-2 border-b-2 border-emerald-600 text-emerald-700';
+        } else {
+          btn.className = 'px-4 py-2 text-slate-600 hover:text-slate-900';
+        }
+      });
+      if (sub === 'fila') carregarFilaGestao();
+      if (sub === 'triagem') carregarTriagemGestao();
+      if (sub === 'sinalizacoes') carregarSinalizacoesGestao();
+    }
+
+    async function recarregarPainelGestao() {
+      const idArea = document.getElementById('gestao-filtro-area').value;
+      const q = idArea ? `?id_area=${idArea}` : '';
+      try {
+        const r = await api(`/gestao/resumo${q}`);
+        const st = r.por_status || {};
+        document.getElementById('gestao-cards-resumo').innerHTML = `
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs text-slate-500">Abertas</span>
+            <p class="text-2xl font-black text-blue-600">${st.aberta || 0}</p>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs text-slate-500">Resolvidas</span>
+            <p class="text-2xl font-black text-emerald-600">${st.resolvida || 0}</p>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs text-slate-500">Triagem IA Pendente</span>
+            <p class="text-2xl font-black text-amber-600">${r.triagem_pendente || 0}</p>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs text-slate-500">Sinalizações Pendentes</span>
+            <p class="text-2xl font-black text-purple-600">${r.sinalizacoes_pendentes || 0}</p>
+          </div>
+          <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs text-slate-500">Descartadas / Duplicadas</span>
+            <p class="text-2xl font-black text-slate-600">${(st.descartada || 0) + (st.duplicada || 0)}</p>
+          </div>
+        `;
+        carregarFilaGestao();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarFilaGestao() {
+      const params = new URLSearchParams({
+        status: document.getElementById('gestao-status').value,
+        ordenar: document.getElementById('gestao-ordem').value
+      });
+      const grav = document.getElementById('gestao-gravidade').value;
+      const area = document.getElementById('gestao-filtro-area').value;
+      if (grav) params.set('gravidade', grav);
+      if (area) params.set('id_area', area);
+
+      try {
+        const res = await api(`/gestao/ocorrencias?${params.toString()}`);
+        const box = document.getElementById('tabela-gestao-ocorrencias');
+        if (!res.itens.length) {
+          box.innerHTML = '<p class="p-6 text-center text-slate-400 text-xs">Nenhuma ocorrência encontrada para estes filtros.</p>';
+          return;
+        }
+        box.innerHTML = `
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-slate-600 border-b">
+                <th class="p-3">ID</th>
+                <th class="p-3">Tipo</th>
+                <th class="p-3">Gravidade</th>
+                <th class="p-3">Status / IA</th>
+                <th class="p-3">Fotos / Avisos</th>
+                <th class="p-3">Data</th>
+                <th class="p-3">Ação</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y">
+              ${res.itens.map(o => `
+                <tr class="hover:bg-slate-50">
+                  <td class="p-3 font-bold">#${o.id_ocorrencia}</td>
+                  <td class="p-3">${escaparHTML(o.tipo)} ${o.categoria ? `<span class="text-slate-400">(${escaparHTML(o.categoria)})</span>` : ''}</td>
+                  <td class="p-3">${badgeGravidade(o.gravidade)}</td>
+                  <td class="p-3">${badgeStatus(o.status)} ${o.confianca_ia ? `<span class="ml-1 text-[11px] text-slate-500">IA ${(o.confianca_ia * 100).toFixed(0)}%</span>` : ''}</td>
+                  <td class="p-3">${o.qtd_fotos} foto(s) ${o.sinalizacoes_pendentes > 0 ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-bold">${o.sinalizacoes_pendentes} aviso(s)</span>` : ''}</td>
+                  <td class="p-3 text-slate-500">${new Date(o.criado_em).toLocaleDateString('pt-BR')}</td>
+                  <td class="p-3">
+                    <button onclick="abrirModalOcorrencia(${o.id_ocorrencia})" class="px-2.5 py-1 rounded bg-slate-800 text-white font-semibold">Inspecionar</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarTriagemGestao() {
+      const area = document.getElementById('gestao-filtro-area').value;
+      const q = area ? `?id_area=${area}` : '';
+      try {
+        const res = await api(`/gestao/triagem${q}`);
+        const box = document.getElementById('lista-gestao-triagem');
+        if (!res.itens.length) {
+          box.innerHTML = '<div class="col-span-2 bg-white p-6 rounded-xl text-center text-slate-400 text-xs">Fila de triagem limpa! Nenhuma ocorrência pendente de revisão humana.</div>';
+          return;
+        }
+        box.innerHTML = res.itens.map(o => `
+          <div class="bg-white p-4 rounded-xl border border-amber-300 shadow-sm flex items-center justify-between text-xs">
+            <div class="space-y-1">
+              <span class="font-bold text-sm">#${o.id_ocorrencia} — ${escaparHTML(o.tipo.toUpperCase())}</span>
+              <p class="text-slate-600">Confiança máx. YOLO: <b>${o.confianca_max ? (o.confianca_max * 100).toFixed(1) + '%' : 'N/A'}</b> (${o.qtd_caixas} caixa(s))</p>
+              <p class="text-slate-400">${new Date(o.criado_em).toLocaleString('pt-BR')}</p>
+            </div>
+            <button onclick="abrirModalOcorrencia(${o.id_ocorrencia})" class="px-3 py-2 rounded-lg bg-amber-500 text-slate-950 font-bold">
+              Revisar Foto e Caixas
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarSinalizacoesGestao() {
+      const area = document.getElementById('gestao-filtro-area').value;
+      const q = area ? `?id_area=${area}` : '';
+      try {
+        const res = await api(`/gestao/sinalizacoes${q}`);
+        const box = document.getElementById('lista-gestao-sinalizacoes');
+        if (!res.itens.length) {
+          box.innerHTML = '<p class="p-6 text-center text-slate-400 text-xs">Nenhuma sinalização pendente.</p>';
+          return;
+        }
+        box.innerHTML = `
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-slate-600 border-b">
+                <th class="p-3">Ocorrência</th>
+                <th class="p-3">Motivo</th>
+                <th class="p-3">Observação do Cidadão</th>
+                <th class="p-3">Ações</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y">
+              ${res.itens.map(s => `
+                <tr>
+                  <td class="p-3 font-bold"><button onclick="abrirModalOcorrencia(${s.id_ocorrencia})" class="text-blue-600 underline">#${s.id_ocorrencia}</button></td>
+                  <td class="p-3 font-semibold">${escaparHTML(s.motivo)} ${s.id_ocorrencia_original ? `(Orig: #${s.id_ocorrencia_original})` : ''}</td>
+                  <td class="p-3 text-slate-600">${escaparHTML(s.descricao || '-')}</td>
+                  <td class="p-3 flex gap-1.5">
+                    <button onclick="responderSinalizacaoGestor(${s.id_sinalizacao}, 'aceita')" class="px-2 py-1 rounded bg-emerald-600 text-white font-semibold">Aceitar</button>
+                    <button onclick="responderSinalizacaoGestor(${s.id_sinalizacao}, 'rejeitada')" class="px-2 py-1 rounded bg-red-600 text-white font-semibold">Rejeitar</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function responderSinalizacaoGestor(idSin, resultado) {
+      try {
+        await api(`/gestao/sinalizacoes/${idSin}/analisar`, { method: 'POST', json: { resultado } });
+        toast(`Sinalização marcada como ${resultado}.`, 'sucesso');
+        recarregarPainelGestao();
+        carregarSinalizacoesGestao();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function executarDecisaoTriagem(decisao) {
+      const grav = document.getElementById('triagem-gravidade').value || null;
+      const motivo = document.getElementById('triagem-motivo-recusa').value.trim() || null;
+      try {
+        await api(`/gestao/ocorrencias/${ocorrenciaAbertaModalId}/triagem`, {
+          method: 'POST',
+          json: {
+            decisao,
+            gravidade_verificada: decisao === 'aprovada' ? grav : null,
+            motivo: decisao === 'recusada' ? motivo : null
+          }
+        });
+        toast(`Triagem concluída: ocorrência ${decisao}!`, 'sucesso');
+        fecharModalOcorrencia();
+        recarregarPainelGestao();
+        carregarTriagemGestao();
+        carregarMapaOcorrencias();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function salvarMudancaStatusGestor() {
+      const status = document.getElementById('gestor-novo-status').value;
+      const grav = document.getElementById('gestor-nova-grav').value || null;
+      const idPrinc = document.getElementById('gestor-id-principal').value;
+      const just = document.getElementById('gestor-justificativa').value.trim() || null;
+
+      try {
+        await api(`/gestao/ocorrencias/${ocorrenciaAbertaModalId}/status`, {
+          method: 'POST',
+          json: {
+            status,
+            gravidade_verificada: grav,
+            id_ocorrencia_principal: status === 'duplicada' && idPrinc ? parseInt(idPrinc, 10) : null,
+            justificativa: just
+          }
+        });
+        toast('Despacho salvo com sucesso!', 'sucesso');
+        fecharModalOcorrencia();
+        recarregarPainelGestao();
+        carregarMapaOcorrencias();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    // -------------------- PAINEL DO ADMINISTRADOR --------------------
+    async function buscarMunicipioIBGE() {
+      const uf = document.getElementById('admin-uf').value.trim();
+      const nome = document.getElementById('admin-busca-mun').value.trim();
+      if (nome.length < 2) return toast('Digite ao menos 2 letras do município.', 'aviso');
+      try {
+        const res = await api(`/admin/municipios/buscar?uf=${encodeURIComponent(uf)}&nome=${encodeURIComponent(nome)}`);
+        const box = document.getElementById('admin-resultados-ibge');
+        if (!res.length) {
+          box.innerHTML = '<p class="text-slate-400">Nenhum município encontrado no IBGE.</p>';
+          return;
+        }
+        box.innerHTML = res.map(m => `
+          <div class="flex items-center justify-between p-2 rounded bg-slate-50 border">
+            <span><b>${escaparHTML(m.nome)}</b> (${m.codigo_ibge}) ${m.ja_cadastrada ? '<span class="text-emerald-600 font-bold">[Já cadastrada]</span>' : ''}</span>
+            <button onclick="visualizarPreviaIBGE('${m.codigo_ibge}')" class="px-2 py-1 rounded bg-purple-100 text-purple-900 font-bold">
+              Ver Contorno
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function visualizarPreviaIBGE(codigoIbge) {
+      try {
+        const prev = await api(`/admin/municipios/${codigoIbge}/previa`);
+        codigoIbgePreviaAtual = codigoIbge;
+        document.getElementById('admin-box-previa').classList.remove('hidden');
+        document.getElementById('admin-previa-titulo').textContent = `${prev.nome} (IBGE ${prev.codigo_ibge} — ${prev.pontos} vértices)`;
+
+        if (!mapaPreviaAdmin) {
+          mapaPreviaAdmin = L.map('mapa-previa-admin').setView([-23.7, -46.4], 11);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapaPreviaAdmin);
+          camadaPreviaAdmin = L.layerGroup().addTo(mapaPreviaAdmin);
+        }
+        setTimeout(() => {
+          mapaPreviaAdmin.invalidateSize();
+          camadaPreviaAdmin.clearLayers();
+          const layer = L.geoJSON(prev.contorno, { style: { color: '#7e22ce', weight: 2 } }).addTo(camadaPreviaAdmin);
+          mapaPreviaAdmin.fitBounds(layer.getBounds());
+        }, 100);
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function confirmarCadastroAreaIBGE() {
+      if (!codigoIbgePreviaAtual) return;
+      try {
+        const res = await api('/admin/areas', {
+          method: 'POST',
+          json: {
+            codigo_ibge: codigoIbgePreviaAtual,
+            exige_residencia: document.getElementById('admin-nova-exige-res').checked
+          }
+        });
+        toast(`Município ${res.nome} cadastrado (${res.ocorrencias_ligadas} ocorrências e ${res.moradores_ligados} moradores vinculados)!`, 'sucesso');
+        document.getElementById('admin-box-previa').classList.add('hidden');
+        carregarAdminAreas();
+        carregarAreasETiposIniciais();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarAdminAreas() {
+      try {
+        const areas = await api('/admin/areas');
+        document.getElementById('admin-lista-areas').innerHTML = areas.map(a => `
+          <div class="p-2.5 rounded-lg border bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="font-bold">${escaparHTML(a.nome)} <span class="text-slate-400">(${a.codigo_ibge})</span></p>
+              <p class="text-[11px] text-slate-500">Abertas: ${a.ocorrencias_abertas} | Total: ${a.ocorrencias_total} | Gestores: ${a.gestores} | Moradores: ${a.moradores}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="alternarCampoAreaAdmin(${a.id_area}, 'exige_residencia', ${!a.exige_residencia})" class="px-2 py-1 rounded border text-[11px] font-semibold ${a.exige_residencia ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-white text-slate-600'}">
+                ${a.exige_residencia ? 'Exige Morador: SIM' : 'Exige Morador: NÃO'}
+              </button>
+              <button onclick="alternarCampoAreaAdmin(${a.id_area}, 'ativa', ${!a.ativa})" class="px-2 py-1 rounded text-[11px] font-bold ${a.ativa ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'}">
+                ${a.ativa ? 'Ativa' : 'Desativada'}
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function alternarCampoAreaAdmin(idArea, campo, valor) {
+      try {
+        await api(`/admin/areas/${idArea}`, { method: 'PATCH', json: { [campo]: valor } });
+        toast('Configuração da cidade atualizada!', 'sucesso');
+        carregarAdminAreas();
+        carregarAreasETiposIniciais();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarAdminUsuarios() {
+      const busca = document.getElementById('admin-busca-usuario').value.trim();
+      const q = busca.length >= 2 ? `?busca=${encodeURIComponent(busca)}` : '';
+      try {
+        const res = await api(`/admin/usuarios${q}`);
+        const opcoesCidades = areasAtendidas.map(f => `<option value="${f.properties.id_area}">${escaparHTML(f.properties.nome)}</option>`).join('');
+        document.getElementById('admin-lista-usuarios').innerHTML = res.itens.map(u => `
+          <div class="p-2.5 rounded-lg border bg-slate-50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="font-bold">${escaparHTML(u.nome)} <span class="text-slate-400">(${escaparHTML(u.email)})</span></p>
+              <p class="text-[11px] text-slate-500">Papel atual: <b>${u.papel}</b> ${u.cidade_gestao ? `(${escaparHTML(u.cidade_gestao)})` : ''} | Status: ${u.status_conta}</p>
+            </div>
+            <div class="flex items-center gap-1">
+              <select id="adm-papel-${u.id_usuario}" class="border rounded px-1.5 py-1 bg-white">
+                <option value="cidadao" ${u.papel === 'cidadao' ? 'selected' : ''}>Cidadão</option>
+                <option value="gestor" ${u.papel === 'gestor' ? 'selected' : ''}>Gestor</option>
+                <option value="admin" ${u.papel === 'admin' ? 'selected' : ''}>Admin</option>
+              </select>
+              <select id="adm-area-${u.id_usuario}" class="border rounded px-1.5 py-1 bg-white">
+                <option value="">Município (se gestor)</option>
+                ${opcoesCidades}
+              </select>
+              <button onclick="salvarPapelUsuarioAdmin(${u.id_usuario})" class="px-2 py-1 rounded bg-purple-600 text-white font-bold">
+                Salvar
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function salvarPapelUsuarioAdmin(idUsuario) {
+      const papel = document.getElementById(`adm-papel-${idUsuario}`).value;
+      const areaVal = document.getElementById(`adm-area-${idUsuario}`).value;
+      try {
+        await api(`/admin/usuarios/${idUsuario}/papel`, {
+          method: 'POST',
+          json: {
+            papel,
+            id_area_gestao: papel === 'gestor' && areaVal ? parseInt(areaVal, 10) : null
+          }
+        });
+        toast('Papel do usuário atualizado!', 'sucesso');
+        carregarAdminUsuarios();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function carregarAdminTipos() {
+      try {
+        const tipos = await api('/admin/tipos');
+        document.getElementById('admin-lista-tipos').innerHTML = tipos.map(t => `
+          <div class="p-2 rounded border bg-slate-50 flex items-center justify-between">
+            <div>
+              <b>${escaparHTML(t.nome)}</b> (<code>${t.codigo}</code>) — ${t.ocorrencias} ocorrência(s)
+              ${t.usa_ia ? '<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 font-bold text-[10px]">IA YOLO</span>' : ''}
+            </div>
+            <button onclick="alternarTipoAtivoAdmin('${t.codigo}', ${!t.ativo})" class="px-2 py-0.5 rounded font-bold ${t.ativo ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'}">
+              ${t.ativo ? 'Ativo' : 'Inativo'}
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function criarNovoTipoAdmin(e) {
+      e.preventDefault();
+      const catsRaw = document.getElementById('tipo-novo-cats').value.trim();
+      const categorias = catsRaw ? catsRaw.split(',').map(c => c.trim()).filter(Boolean) : [];
+      try {
+        await api('/admin/tipos', {
+          method: 'POST',
+          json: {
+            codigo: document.getElementById('tipo-novo-codigo').value.trim(),
+            nome: document.getElementById('tipo-novo-nome').value.trim(),
+            usa_gravidade: document.getElementById('tipo-novo-grav').checked,
+            categorias
+          }
+        });
+        toast('Novo tipo de ocorrência cadastrado!', 'sucesso');
+        e.target.reset();
+        carregarAdminTipos();
+        carregarAreasETiposIniciais();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    async function alternarTipoAtivoAdmin(codigo, ativo) {
+      try {
+        await api(`/admin/tipos/${codigo}`, { method: 'PATCH', json: { ativo } });
+        carregarAdminTipos();
+        carregarAreasETiposIniciais();
+      } catch (err) {
+        toast(err.message, 'erro');
+      }
+    }
+
+    // -------------------- BOOTSTRAP INICIAL --------------------
+    window.addEventListener('DOMContentLoaded', async () => {
+      inicializarMapa();
+      await carregarUsuarioAtual();
+      await carregarAreasETiposIniciais();
+    });
+  </script>
+</body>
+</html>

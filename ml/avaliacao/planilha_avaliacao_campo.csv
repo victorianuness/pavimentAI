@@ -1,0 +1,13 @@
+﻿video;trecho;distancia_km;condicao (sol/sombra/molhado);buracos_reais_visiveis;acertos;perdidos;falsos_alarmes;recall;precisao;falsos_alarmes_por_km;o_que_enganou_o_modelo (bueiro, remendo, sombra...);conf_usada
+rua1.mp4;Rua A (Exemplo);0,5;sol forte;10;8;=SE(OU(E2="";F2="");"";MÁXIMO(0;E2-F2));1;=SE(E2="";"";SEERRO(F2/E2;0));=SE(F2="";"";SEERRO(F2/(F2+H2);0));=SE(OU(H2="";C2="");"";SEERRO(H2/C2;0));sombra de árvore;0,25
+rua1.mp4;Rua B (Exemplo);0,3;sombra de árvores;5;4;=SE(OU(E3="";F3="");"";MÁXIMO(0;E3-F3));0;=SE(E3="";"";SEERRO(F3/E3;0));=SE(F3="";"";SEERRO(F3/(F3+H3);0));=SE(OU(H3="";C3="");"";SEERRO(H3/C3;0));nenhum;0,25
+rua2.mp4;Av. Capitão João;0,8;nublado / asfalto seco;;;=SE(OU(E4="";F4="");"";MÁXIMO(0;E4-F4));;=SE(E4="";"";SEERRO(F4/E4;0));=SE(F4="";"";SEERRO(F4/(F4+H4);0));=SE(OU(H4="";C4="");"";SEERRO(H4/C4;0));;0,25
+rua2.mp4;Av. Barão de Mauá;1,0;sol forte;;;=SE(OU(E5="";F5="");"";MÁXIMO(0;E5-F5));;=SE(E5="";"";SEERRO(F5/E5;0));=SE(F5="";"";SEERRO(F5/(F5+H5);0));=SE(OU(H5="";C5="");"";SEERRO(H5/C5;0));;0,25
+rua3.mp4;Trecho 1 (Com remendos);0,6;asfalto velho / remendado;;;=SE(OU(E6="";F6="");"";MÁXIMO(0;E6-F6));;=SE(E6="";"";SEERRO(F6/E6;0));=SE(F6="";"";SEERRO(F6/(F6+H6);0));=SE(OU(H6="";C6="");"";SEERRO(H6/C6;0));;0,35
+rua3.mp4;Trecho 2 (Pista molhada);0,4;asfalto molhado / pós-chuva;;;=SE(OU(E7="";F7="");"";MÁXIMO(0;E7-F7));;=SE(E7="";"";SEERRO(F7/E7;0));=SE(F7="";"";SEERRO(F7/(F7+H7);0));=SE(OU(H7="";C7="");"";SEERRO(H7/C7;0));;0,35
+rua4.mp4;Trecho 3 (Sombra intensa);0,5;fim de tarde / sombra;;;=SE(OU(E8="";F8="");"";MÁXIMO(0;E8-F8));;=SE(E8="";"";SEERRO(F8/E8;0));=SE(F8="";"";SEERRO(F8/(F8+H8);0));=SE(OU(H8="";C8="");"";SEERRO(H8/C8;0));;0,45
+rua4.mp4;Trecho 4 (Asfalto novo - controle);0,7;sol forte (sem buracos);0;0;=SE(OU(E9="";F9="");"";MÁXIMO(0;E9-F9));;=SE(E9="";"";SEERRO(F9/E9;0));=SE(F9="";"";SEERRO(F9/(F9+H9);0));=SE(OU(H9="";C9="");"";SEERRO(H9/C9;0));;0,45
+;;;;;;=SE(OU(E10="";F10="");"";MÁXIMO(0;E10-F10));;=SE(E10="";"";SEERRO(F10/E10;0));=SE(F10="";"";SEERRO(F10/(F10+H10);0));=SE(OU(H10="";C10="");"";SEERRO(H10/C10;0));;0,25
+;;;;;;=SE(OU(E11="";F11="");"";MÁXIMO(0;E11-F11));;=SE(E11="";"";SEERRO(F11/E11;0));=SE(F11="";"";SEERRO(F11/(F11+H11);0));=SE(OU(H11="";C11="");"";SEERRO(H11/C11;0));;0,25
+;;;;;;=SE(OU(E12="";F12="");"";MÁXIMO(0;E12-F12));;=SE(E12="";"";SEERRO(F12/E12;0));=SE(F12="";"";SEERRO(F12/(F12+H12);0));=SE(OU(H12="";C12="");"";SEERRO(H12/C12;0));;0,25
+TOTAL / RESUMO GERAL;Todos os trechos;=SOMA(C2:C12);-;=SOMA(E2:E12);=SOMA(F2:F12);=SOMA(G2:G12);=SOMA(H2:H12);=SEERRO(F13/E13;0);=SEERRO(F13/(F13+H13);0);=SEERRO(H13/C13;0);-;-
