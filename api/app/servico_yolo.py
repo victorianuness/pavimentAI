@@ -8,7 +8,7 @@ from ultralytics import YOLO
 from .config import settings
 
 LIMIAR_MINIMO = 0.25
-LIMIAR_CONFIRMA = 0.50
+LIMIAR_CONFIRMA = 0.60  # a partir daqui a IA confirma sozinha; entre o mínimo e este valor vai para a triagem
 VERSAO_MODELO = "yolo11n-dataset-v3"
 
 # Gravidade estimada pela área da caixa relativa à imagem

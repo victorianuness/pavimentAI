@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import get_conn, pool, pool_admin
+from .erros import registrar_handlers
 from .routers import admin, areas, auth, cep, fotos, gestao, ocorrencias, sinalizacoes
 from .servico_yolo import carregar_modelo
 
@@ -32,6 +33,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PavimentAI API", version="1.0.0", lifespan=lifespan)
+
+registrar_handlers(app)  # todo erro sai como {codigo, mensagem}
 
 # Deixa o front (HTML/JS em outro endereço) chamar a API pelo navegador
 app.add_middleware(

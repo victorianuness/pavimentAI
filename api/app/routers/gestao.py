@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from .. import auditoria
 from ..db import get_conn
 from ..deps import exigir_gestao_da_area, exigir_papel
+from ..paginacao import paginar
 from ..schemas import AnaliseIn, MudarStatusIn, OcorrenciaOut, TriagemIn
 from .ocorrencias import COLUNAS
 
@@ -115,7 +116,8 @@ def listar(
     """Fila de trabalho da cidade. Por padrão: abertas, as mais graves e antigas primeiro."""
     area = _escopo(u, id_area)
 
-    linhas = conn.execute(
+    return paginar(
+        conn,
         f"""
         WITH base AS (
             SELECT o.id_ocorrencia, o.tipo, o.categoria, o.descricao, o.status,
@@ -147,14 +149,9 @@ def listar(
             "limite": limite,
             "desloc": deslocamento,
         },
-    ).fetchall()
-
-    total = linhas[0]["total"] if linhas else 0
-
-    return {
-        "total": total,
-        "itens": [{k: v for k, v in l.items() if k != "total"} for l in linhas],
-    }
+        limite,
+        deslocamento,
+    )
 
 
 @router.get("/ocorrencias/{id_ocorrencia}")
@@ -349,7 +346,8 @@ def listar_sinalizacoes(
     """Avisos dos cidadãos sobre ocorrências."""
     area = _escopo(u, id_area)
 
-    linhas = conn.execute(
+    return paginar(
+        conn,
         """
         SELECT s.id_sinalizacao, s.motivo, s.descricao, s.status_analise, s.criada_em, s.analisada_em,
                s.id_ocorrencia_original, o.id_ocorrencia, o.tipo, o.categoria,
@@ -368,14 +366,9 @@ def listar_sinalizacoes(
             "limite": limite,
             "desloc": deslocamento,
         },
-    ).fetchall()
-
-    total = linhas[0]["total"] if linhas else 0
-
-    return {
-        "total": total,
-        "itens": [{k: v for k, v in l.items() if k != "total"} for l in linhas],
-    }
+        limite,
+        deslocamento,
+    )
 
 
 @router.post("/sinalizacoes/{id_sinalizacao}/analisar")
@@ -433,10 +426,11 @@ def fila_triagem(
     u=Depends(Gestao),
     conn=Depends(get_conn),
 ):
-    """Ocorrências em que a IA ficou na dúvida (confiança entre 0,25 e 0,50) ou enviadas da galeria."""
+    """Ocorrências em que a IA ficou na dúvida (confiança entre 0,25 e 0,60) ou enviadas da galeria."""
     area = _escopo(u, id_area)
 
-    linhas = conn.execute(
+    return paginar(
+        conn,
         f"""
         SELECT o.id_ocorrencia, o.tipo, o.descricao, o.latitude, o.longitude,
                o.criado_em, o.id_area, ia.gravidade_ia, ia.confianca_max,
@@ -453,14 +447,9 @@ def fila_triagem(
         LIMIT %(limite)s OFFSET %(desloc)s
         """,
         {"area": area, "limite": limite, "desloc": deslocamento},
-    ).fetchall()
-
-    total = linhas[0]["total"] if linhas else 0
-
-    return {
-        "total": total,
-        "itens": [{k: v for k, v in l.items() if k != "total"} for l in linhas],
-    }
+        limite,
+        deslocamento,
+    )
 
 
 @router.post("/ocorrencias/{id_ocorrencia}/triagem")

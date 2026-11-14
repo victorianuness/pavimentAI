@@ -8,6 +8,7 @@ from .. import auditoria, ibge
 from ..config import settings
 from ..db import get_conn_admin
 from ..deps import exigir_papel
+from ..paginacao import paginar
 from ..schemas import (
     AreaAlterarIn,
     AreaNovaIn,
@@ -200,7 +201,8 @@ def listar_usuarios(
     conn=Depends(get_conn_admin),
 ):
     """Procura usuários para o admin promover a gestor. Nunca mostra senha."""
-    linhas = conn.execute(
+    return paginar(
+        conn,
         """
         SELECT x.id_usuario, x.nome, x.email, x.papel, x.status_conta, x.id_area_gestao,
                g.nome AS cidade_gestao, r.nome AS cidade_residencia, count(*) OVER () AS total
@@ -221,12 +223,9 @@ def listar_usuarios(
             "limite": limite,
             "desloc": deslocamento,
         },
-    ).fetchall()
-    total = linhas[0]["total"] if linhas else 0
-    return {
-        "total": total,
-        "itens": [{k: v for k, v in l.items() if k != "total"} for l in linhas],
-    }
+        limite,
+        deslocamento,
+    )
 
 
 @router.post("/usuarios/{id_usuario}/papel")

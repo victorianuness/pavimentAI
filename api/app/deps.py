@@ -5,6 +5,8 @@ from .db import get_conn
 from .seguranca import ler_token
 
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Para rotas públicas que mostram mais coisas a quem está logado (sem exigir login)
+oauth2_opcional = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 # Colunas do usuário que a API carrega a cada requisição (nunca inclui a senha)
 COLUNAS_USUARIO = """
@@ -35,6 +37,23 @@ def usuario_atual(token: str = Depends(oauth2), conn=Depends(get_conn)):
     ).fetchone()
     if u is None or u["status_conta"] != "ativa":
         raise erro
+    return u
+
+
+def usuario_opcional(token: str | None = Depends(oauth2_opcional), conn=Depends(get_conn)):
+    """Igual a usuario_atual, mas devolve None (visitante) em vez de erro.
+    Token ausente, inválido ou de conta suspensa conta como visitante."""
+    if not token:
+        return None
+    id_usuario = ler_token(token)
+    if id_usuario is None:
+        return None
+    u = conn.execute(
+        f"SELECT {COLUNAS_USUARIO} FROM usuarios WHERE id_usuario = %s",
+        (id_usuario,),
+    ).fetchone()
+    if u is None or u["status_conta"] != "ativa":
+        return None
     return u
 
 

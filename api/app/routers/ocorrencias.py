@@ -5,8 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from .. import auditoria
 from ..config import settings
 from ..db import get_conn
-from ..deps import checar_quem_pode_registrar, usuario_atual
-from ..schemas import OcorrenciaIn, OcorrenciaOut
+from ..acesso import exigir_acesso_a_ocorrencia
+from ..deps import (
+    checar_quem_pode_registrar,
+    exigir_gestao_da_area,
+    usuario_atual,
+    usuario_opcional,
+)
+from ..paginacao import paginar
+from ..schemas import OcorrenciaIn, OcorrenciaOut, PaginaOcorrencias
 
 router = APIRouter(prefix="/ocorrencias", tags=["Ocorrências"])
 
@@ -23,7 +30,14 @@ COLUNAS = """
          FROM deteccoes_ia d WHERE d.id_ocorrencia = ocorrencias.id_ocorrencia)
     ) AS gravidade,
     latitude, longitude, status, canal_registro,
-    criado_em, verificada_em, id_ocorrencia_principal, id_area, situacao_ia
+    criado_em, verificada_em, id_ocorrencia_principal, id_area, situacao_ia,
+    CASE WHEN triagem_decisao = 'recusada' THEN 'recusada_gestor'
+         WHEN triagem_decisao = 'aprovada' THEN 'aprovada_gestor'
+         WHEN situacao_ia = 'confirmada'   THEN 'confirmada_ia'
+         WHEN situacao_ia = 'triagem'      THEN 'em_triagem'
+         WHEN NOT COALESCE((SELECT t.usa_ia FROM tipos_ocorrencia t
+                             WHERE t.codigo = ocorrencias.tipo), TRUE) THEN 'sem_ia'
+         ELSE 'sem_foto' END AS verificacao
 """
 
 MAX_GRAUS_MAPA = 10  # tamanho máximo da área pedida no mapa (em graus)
@@ -131,6 +145,7 @@ def criar(dados: OcorrenciaIn, u=Depends(usuario_atual), conn=Depends(get_conn))
             raise HTTPException(
                 409,
                 detail={
+                    "codigo": "ocorrencia_duplicada",
                     "mensagem": (
                         "Já existe uma ocorrência parecida aberta por perto. "
                         "Envie criar_mesmo_assim=true para registrar assim mesmo."
@@ -207,13 +222,35 @@ def mapa(
         ),
     ] = "verificadas",
     limite: Annotated[int, Query(ge=1, le=2000)] = 500,
+    u=Depends(usuario_opcional),
     conn=Depends(get_conn),
 ):
-    """Ocorrências abertas dentro de uma área, em GeoJSON (pronto para Leaflet/Mapbox)."""
+    """Ocorrências abertas dentro de uma área, em GeoJSON (pronto para Leaflet/Mapbox).
+
+    Qualquer pessoa vê as verificadas. `verificacao=todas` (inclui triagem e sem foto) é só para
+    gestão: o gestor vê apenas a própria cidade; o admin vê qualquer uma.
+    """
     if lat_min >= lat_max or lon_min >= lon_max:
         raise HTTPException(422, "A área precisa ter lat_min < lat_max e lon_min < lon_max")
     if lat_max - lat_min > MAX_GRAUS_MAPA or lon_max - lon_min > MAX_GRAUS_MAPA:
         raise HTTPException(422, "Área muito grande. Dê mais zoom no mapa.")
+
+    if verificacao == "todas":
+        if u is None:
+            raise HTTPException(
+                401,
+                "Entre com uma conta de gestão para ver as ocorrências ainda não verificadas.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if u["papel"] not in ("gestor", "admin"):
+            raise HTTPException(
+                403,
+                {"codigo": "so_gestao", "mensagem": "Só a gestão vê ocorrências ainda não verificadas."},
+            )
+        if u["papel"] == "gestor":
+            if id_area is not None:
+                exigir_gestao_da_area(u, id_area)  # 403 se pediu outra cidade
+            id_area = u["id_area_gestao"]
 
     linhas = conn.execute(
         """
@@ -278,7 +315,7 @@ def mapa(
     }
 
 
-@router.get("/minhas", response_model=list[OcorrenciaOut])
+@router.get("/minhas", response_model=PaginaOcorrencias)
 def minhas(
     limite: Annotated[int, Query(ge=1, le=100)] = 50,
     deslocamento: Annotated[int, Query(ge=0)] = 0,
@@ -286,15 +323,18 @@ def minhas(
     conn=Depends(get_conn),
 ):
     """Ocorrências registradas por quem está logado (mais novas primeiro)."""
-    return conn.execute(
+    return paginar(
+        conn,
         f"""
-        SELECT {COLUNAS} FROM ocorrencias
-        WHERE id_usuario_criador = %s
+        SELECT {COLUNAS}, count(*) OVER () AS total FROM ocorrencias
+        WHERE id_usuario_criador = %(usuario)s
         ORDER BY criado_em DESC
-        LIMIT %s OFFSET %s
+        LIMIT %(limite)s OFFSET %(desloc)s
         """,
-        (u["id_usuario"], limite, deslocamento),
-    ).fetchall()
+        {"usuario": u["id_usuario"]},
+        limite,
+        deslocamento,
+    )
 
 
 @router.get("/tipos")
@@ -309,7 +349,13 @@ def listar_tipos(conn=Depends(get_conn)):
 
 
 @router.get("/{id_ocorrencia}", response_model=OcorrenciaOut)
-def obter(id_ocorrencia: Annotated[int, Path(ge=1, le=2**63 - 1)], conn=Depends(get_conn)):
+def obter(
+    id_ocorrencia: Annotated[int, Path(ge=1, le=2**63 - 1)],
+    u=Depends(usuario_opcional),
+    conn=Depends(get_conn),
+):
+    """Detalhe de uma ocorrência. Verificadas: qualquer pessoa. As demais: dono, gestor da cidade ou admin."""
+    exigir_acesso_a_ocorrencia(conn, u, id_ocorrencia)
     o = conn.execute(
         f"SELECT {COLUNAS} FROM ocorrencias WHERE id_ocorrencia = %s",
         (id_ocorrencia,),

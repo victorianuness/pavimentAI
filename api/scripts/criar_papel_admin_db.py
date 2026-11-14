@@ -81,6 +81,7 @@ def main() -> int:
                     sql.Identifier(conexao["dbname"]), papel
                 ),
                 sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(papel),
+                sql.SQL("GRANT SELECT ON public.spatial_ref_sys TO {}").format(papel),  # funções ST_* do PostGIS
                 sql.SQL(
                     "GRANT SELECT ON public.areas_atendimento, public.usuarios, public.ocorrencias TO {}"
                 ).format(papel),

@@ -9,9 +9,10 @@ from fastapi.responses import FileResponse
 from psycopg.types.json import Jsonb
 
 from .. import auditoria
+from ..acesso import SQL_VERIFICADA, exigir_acesso_a_ocorrencia, pode_ver
 from ..config import settings
 from ..db import get_conn
-from ..deps import exigir_gestao_da_area, usuario_atual
+from ..deps import exigir_gestao_da_area, usuario_atual, usuario_opcional
 from ..imagens import MAX_BYTES, ImagemInvalida, processar
 from ..schemas import FotoOut
 from ..servico_yolo import VERSAO_MODELO, analisar_imagem
@@ -331,14 +332,13 @@ def enviar_foto(
 
 
 @router.get("/ocorrencias/{id_ocorrencia}/fotos", response_model=list[FotoOut])
-def listar_fotos(id_ocorrencia: IdBigint, conn=Depends(get_conn)):
-    existe = conn.execute(
-        "SELECT 1 FROM ocorrencias WHERE id_ocorrencia = %s",
-        (id_ocorrencia,),
-    ).fetchone()
-
-    if not existe:
-        raise HTTPException(404, "Ocorrência não encontrada")
+def listar_fotos(
+    id_ocorrencia: IdBigint,
+    u=Depends(usuario_opcional),
+    conn=Depends(get_conn),
+):
+    """Lista as fotos. Ocorrência verificada: qualquer pessoa. As demais: dono, gestor da cidade ou admin."""
+    exigir_acesso_a_ocorrencia(conn, u, id_ocorrencia)
 
     linhas = conn.execute(
         """
@@ -356,14 +356,34 @@ def listar_fotos(id_ocorrencia: IdBigint, conn=Depends(get_conn)):
 
 
 @router.get("/midias/{id_midia}/arquivo")
-def baixar_foto(id_midia: IdBigint, conn=Depends(get_conn)):
-    """Devolve a imagem. O caminho vem sempre do banco, nunca do usuário."""
+def baixar_foto(
+    id_midia: IdBigint,
+    u=Depends(usuario_opcional),
+    conn=Depends(get_conn),
+):
+    """Devolve a imagem. O caminho vem sempre do banco, nunca do usuário.
+
+    A foto segue a regra da ocorrência: se ela já foi verificada, qualquer pessoa vê;
+    senão, só o dono, o gestor da cidade ou o admin (que precisam mandar o token no cabeçalho).
+    """
     m = conn.execute(
         "SELECT caminho_arquivo, tipo_mime FROM midias WHERE id_midia = %s",
         (id_midia,),
     ).fetchone()
-
     if m is None:
+        raise HTTPException(404, "Foto não encontrada")
+
+    vinculos = conn.execute(
+        f"""
+        SELECT o.id_usuario_criador, o.id_area, {SQL_VERIFICADA} AS verificada
+        FROM ocorrencia_midias om
+        JOIN ocorrencias o ON o.id_ocorrencia = om.id_ocorrencia
+        JOIN tipos_ocorrencia t ON t.codigo = o.tipo
+        WHERE om.id_midia = %s
+        """,
+        (id_midia,),
+    ).fetchall()
+    if not any(pode_ver(u, v) for v in vinculos):
         raise HTTPException(404, "Foto não encontrada")
 
     base = settings.uploads_dir.resolve()
@@ -372,8 +392,9 @@ def baixar_foto(id_midia: IdBigint, conn=Depends(get_conn)):
     if not caminho.is_relative_to(base) or not caminho.is_file():
         raise HTTPException(404, "Arquivo da foto não encontrado")
 
+    publica = any(v["verificada"] for v in vinculos)
     return FileResponse(
         caminho,
         media_type=m["tipo_mime"],
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "public, max-age=86400" if publica else "private, max-age=3600"},
     )

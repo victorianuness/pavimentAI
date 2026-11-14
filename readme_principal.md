@@ -28,8 +28,8 @@ PavimentAI/
 
 1. **Validação em Duas Etapas (IA + Triagem Humana):**
    O modelo YOLO11n (`mAP@50` de $89,1\%$ na validação e $84,9\%$ no conjunto de teste inédito) analisa cada foto enviada pelo cidadão:
-   * **Confiança $\ge 50\%$ (Câmera no local):** Ocorrência confirmada automaticamente no mapa público e gravidade (leve, moderado, grave) calculada pela área relativa da *bounding box*.
-   * **Confiança entre $25\%$ e $50\%$ (ou Galeria):** Encaminhada para a Fila de Triagem do Gestor, que visualiza as caixas da IA sobre a foto para aprovar ou recusar.
+   * **Confiança $\ge 60\%$ (Câmera no local):** Ocorrência confirmada automaticamente no mapa público e gravidade (leve, moderado, grave) calculada pela área relativa da *bounding box*.
+   * **Confiança entre $25\%$ e $60\%$ (ou Galeria):** Encaminhada para a Fila de Triagem do Gestor, que visualiza as caixas da IA sobre a foto para aprovar ou recusar.
    * **Confiança $< 25\%$:** Foto recusada imediatamente com orientação de enquadramento.
 
 2. **Retroalimentação Contínua (Active Learning):**

@@ -701,16 +701,30 @@
         dados = await resp.json();
       }
       if (!resp.ok) {
-        const detalhe = dados?.detail;
-        const msg = typeof detalhe === 'string'
-          ? detalhe
-          : (detalhe?.mensagem || (Array.isArray(detalhe) ? detalhe.map(d => d.msg).join(', ') : `Erro HTTP ${resp.status}`));
+        // A API devolve todo erro como {codigo, mensagem, ...campos extras}
+        const msg = dados?.mensagem || `Erro HTTP ${resp.status}`;
         const err = new Error(msg);
         err.status = resp.status;
-        err.detail = detalhe;
+        err.codigo = dados?.codigo;
+        err.detail = dados; // traz também campos extras (ex.: proximas na duplicidade)
         throw err;
       }
       return dados;
+    }
+
+    // Fotos de ocorrências ainda não verificadas exigem login, e <img src> não envia o token.
+    // Por isso buscamos a imagem com o cabeçalho Authorization e mostramos como blob.
+    async function carregarFotosAutenticadas(container) {
+      for (const img of container.querySelectorAll('img[data-foto-url]')) {
+        try {
+          const headers = tokenJWT ? { Authorization: `Bearer ${tokenJWT}` } : {};
+          const resp = await fetch(img.dataset.fotoUrl, { headers });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          img.src = URL.createObjectURL(await resp.blob());
+        } catch {
+          img.alt = 'Foto indisponível';
+        }
+      }
     }
 
     function badgeGravidade(g) {
@@ -862,6 +876,13 @@
 
     async function carregarMapaOcorrencias() {
       if (!mapa) return;
+      // "Todas (inclui triagem)" é só da gestão; quem não é gestor volta para as verificadas
+      const selVerif = document.getElementById('filtro-mapa-verif');
+      const ehGestao = usuarioLogado && ['gestor', 'admin'].includes(usuarioLogado.papel);
+      const opcaoTodas = selVerif.querySelector('option[value="todas"]');
+      opcaoTodas.hidden = !ehGestao;
+      opcaoTodas.disabled = !ehGestao;
+      if (!ehGestao && selVerif.value === 'todas') selVerif.value = 'verificadas';
       const b = mapa.getBounds();
       const params = new URLSearchParams({
         lat_min: Math.max(-90, b.getSouth()).toFixed(6),
@@ -1286,11 +1307,12 @@
             `).join('');
             return `
               <div class="relative rounded-xl overflow-hidden border border-slate-300 bg-slate-900">
-                <img src="${API_BASE}${f.url}" alt="Foto da ocorrência" class="w-full h-56 object-contain" />
+                <img data-foto-url="${API_BASE}${f.url}" alt="Foto da ocorrência" class="w-full h-56 object-contain" />
                 <div class="absolute inset-0">${overlays}</div>
               </div>
             `;
           }).join('');
+          carregarFotosAutenticadas(containerFotos);
         }
 
         // Botão de anexar mais fotos (criador dentro do prazo ou gestor)
@@ -1371,7 +1393,7 @@
     async function carregarMinhasOcorrencias() {
       const box = document.getElementById('lista-minhas-ocorrencias');
       try {
-        const itens = await api('/ocorrencias/minhas');
+        const itens = (await api('/ocorrencias/minhas')).itens;
         if (!itens.length) {
           box.innerHTML = '<div class="col-span-2 bg-white p-6 rounded-xl text-center text-slate-500 text-sm">Você ainda não registrou nenhuma ocorrência.</div>';
           return;

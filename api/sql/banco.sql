@@ -166,6 +166,10 @@ CREATE INDEX IF NOT EXISTS ix_auditoria_usuario_acao
 -- 12) Permissões da API (pavimentai_app)
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 
+-- O REVOKE acima também tira a leitura da tabela de sistemas de coordenadas do PostGIS,
+-- que as funções ST_* consultam. Sem este GRANT, toda rota com mapa/GPS dá erro 500.
+GRANT SELECT ON public.spatial_ref_sys TO pavimentai_app;
+
 GRANT SELECT, INSERT ON public.usuarios TO pavimentai_app;
 GRANT UPDATE (nome, telefone, hash_senha, email_verificado, email_verificado_em, status_conta)
     ON public.usuarios TO pavimentai_app;

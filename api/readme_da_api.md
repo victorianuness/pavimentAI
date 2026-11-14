@@ -50,6 +50,6 @@ python -m uvicorn app.main:app --reload
 
 1. **Cerca Geográfica PostGIS:** Só aceita ocorrências dentro do polígono oficial (`ST_DWithin` com tolerância configurável de divisa) de municípios ativos.
 2. **Antifraude Fotográfico e LGPD:** Exige foto recente e próxima ao local (`ST_Distance`), bloqueia fotos duplicadas (SHA-256) ou visualmente similares em outras ocorrências (*dHash* perceptual de 64 bits via `bit_count` no PostgreSQL), corrige orientação e remove todos os metadados EXIF ao regravar a imagem.
-3. **Triagem Inteligente com YOLO11n:** Fotos da câmera com confiança $\ge 50\%$ são confirmadas automaticamente e preenchem a severidade estimada pela área da *bounding box*; fotos entre $25\%$ e $50\%$ (ou vindas da galeria) vão para a Fila de Triagem do Gestor; fotos $< 25\%$ são recusadas na hora.
+3. **Triagem Inteligente com YOLO11n:** Fotos da câmera com confiança $\ge 60\%$ são confirmadas automaticamente e preenchem a severidade estimada pela área da *bounding box*; fotos entre $25\%$ e $60\%$ (ou vindas da galeria) vão para a Fila de Triagem do Gestor; fotos $< 25\%$ são recusadas na hora.
 4. **Segregação de Privilégios no PostgreSQL:** A conexão pública (`pavimentai_app`) não tem permissão de `DELETE` nem de alterar papéis ou áreas; a conexão administrativa (`pavimentai_admin`) só altera colunas específicas e nunca lê hashes de senha.
 5. **Conformidade LGPD (`DELETE /auth/me`):** Anonimização irreversível de dados pessoais de cidadãos via `SECURITY DEFINER` preservando o histórico estatístico da zeladoria urbana.

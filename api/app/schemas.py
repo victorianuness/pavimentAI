@@ -181,6 +181,16 @@ class OcorrenciaOut(BaseModel):
     id_ocorrencia_principal: int | None
     id_area: int | None = None          # cidade/área de atendimento onde foi registrada
     situacao_ia: str | None = None      # confirmada, triagem ou None
+    # Situação de verificação (a mesma do mapa): confirmada_ia, aprovada_gestor, em_triagem,
+    # sem_foto, sem_ia (tipos sem IA) ou recusada_gestor
+    verificacao: str | None = None
+
+
+class PaginaOcorrencias(BaseModel):
+    total: int
+    limite: int
+    deslocamento: int
+    itens: list[OcorrenciaOut]
 
 
 # -------------------------------------------------------------------- fotos
