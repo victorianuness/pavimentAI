@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+/api/.env
+/api/.env.*
+!/api/.env.example
+venv/
+.venv/
+__pycache__/
+api/uploads/
+*.pt
+ml/datasets 
+ml/inference/videos_de_teste/
