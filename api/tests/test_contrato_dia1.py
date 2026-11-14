@@ -256,3 +256,144 @@ def test_mapa_todas_gestor_ve_so_a_propria_cidade(mundo):
     assert r.status_code == 403 and r.json()["codigo"] == "outro_municipio"
     # sem pedir área específica, fica preso à própria cidade (nada aparece aqui)
     assert _ids(c.get(url, headers=H(mundo, "gestor2"))) == set()
+
+
+PARAMS_CLUSTERS = (
+    "lat_min=-23.72&lat_max=-23.62&lon_min=-46.51&lon_max=-46.41"
+    "&id_area={id_area}&tipo=acessibilidade&categorias=travessia"
+    "&tamanho_celula_m=250&minimo_ocorrencias=3&dias=30"
+)
+
+
+def test_clusters_agrupam_em_metros_filtram_e_nao_multiplicam_midias(mundo, admin_conn):
+    c = admin_conn
+    ids_ocorrencias = []
+    ids_midias = []
+    ponto = (-23.7000, -46.5000)
+    separados = (-23.7000, -46.4900)
+
+    try:
+        for lat, lon, status in (
+            (*ponto, "aberta"),
+            (*ponto, "aberta"),
+            (*ponto, "aberta"),
+            (*ponto, "resolvida"),
+            (*separados, "aberta"),
+        ):
+            id_ocorrencia = c.execute(
+                """INSERT INTO ocorrencias
+                       (tipo, categoria, latitude, longitude, status, id_area)
+                   VALUES ('acessibilidade', 'travessia', %s, %s, %s, %s)
+                   RETURNING id_ocorrencia""",
+                (lat, lon, status, mundo["a1"]),
+            ).fetchone()[0]
+            ids_ocorrencias.append(id_ocorrencia)
+
+        # Múltiplas fotos da mesma ocorrência não devem multiplicar a contagem.
+        for indice in range(2):
+            id_midia = c.execute(
+                """INSERT INTO midias (caminho_arquivo, nome_arquivo, origem, hash_arquivo)
+                   VALUES (%s, %s, 'foto_cidadao', %s) RETURNING id_midia""",
+                (f"cluster-{indice}.jpg", f"cluster-{indice}.jpg", str(indice).zfill(64)),
+            ).fetchone()[0]
+            ids_midias.append(id_midia)
+            c.execute(
+                "INSERT INTO ocorrencia_midias (id_ocorrencia, id_midia) VALUES (%s, %s)",
+                (ids_ocorrencias[0], id_midia),
+            )
+
+        base = f"/ocorrencias/clusters?{PARAMS_CLUSTERS.format(id_area=mundo['a1'])}"
+        resposta = mundo["client"].get(base)
+        assert resposta.status_code == 200, resposta.text
+        dados = resposta.json()
+        assert dados["type"] == "FeatureCollection"
+        assert dados["srid_metrico"] == 32723
+        assert len(dados["features"]) == 1
+
+        feature = dados["features"][0]
+        longitude, latitude = feature["geometry"]["coordinates"]
+        assert -47 < longitude < -46
+        assert -24 < latitude < -23
+        assert feature["properties"]["total_ocorrencias"] == 3
+        assert feature["properties"]["por_status"] == {"aberta": 3}
+        assert feature["properties"]["por_gravidade"] == {"sem_classificacao": 3}
+        assert feature["properties"]["por_tipo"] == [
+            {"tipo": "acessibilidade", "total": 3, "categorias": {"travessia": 3}}
+        ]
+
+        com_encerradas = mundo["client"].get(
+            base + "&status=aberta&status=resolvida"
+        )
+        assert com_encerradas.status_code == 200, com_encerradas.text
+        assert com_encerradas.json()["features"][0]["properties"]["total_ocorrencias"] == 4
+        assert com_encerradas.json()["features"][0]["properties"]["por_status"] == {
+            "aberta": 3,
+            "resolvida": 1,
+        }
+
+        abaixo_do_minimo = mundo["client"].get(base + "&minimo_ocorrencias=4")
+        assert abaixo_do_minimo.status_code == 200
+        assert abaixo_do_minimo.json()["features"] == []
+
+        categoria_sem_resultado = mundo["client"].get(
+            base.replace("categorias=travessia", "categorias=piso_tatil")
+        )
+        assert categoria_sem_resultado.status_code == 200
+        assert categoria_sem_resultado.json()["features"] == []
+    finally:
+        if ids_midias:
+            c.execute("DELETE FROM midias WHERE id_midia = ANY(%s)", (ids_midias,))
+        if ids_ocorrencias:
+            c.execute("DELETE FROM ocorrencias WHERE id_ocorrencia = ANY(%s)", (ids_ocorrencias,))
+
+
+def test_clusters_respeitam_visibilidade_e_area_do_gestor(mundo, admin_conn):
+    c = admin_conn
+    ids = []
+    try:
+        for _ in range(3):
+            id_ocorrencia = c.execute(
+                """INSERT INTO ocorrencias
+                       (tipo, latitude, longitude, id_area, situacao_ia)
+                   VALUES ('buraco', -23.7000, -46.5000, %s, 'triagem')
+                   RETURNING id_ocorrencia""",
+                (mundo["a1"],),
+            ).fetchone()[0]
+            ids.append(id_ocorrencia)
+
+        params = (
+            "lat_min=-23.72&lat_max=-23.62&lon_min=-46.51&lon_max=-46.41"
+            "&tipo=buraco&tamanho_celula_m=250&minimo_ocorrencias=3"
+        )
+        url = f"/ocorrencias/clusters?{params}"
+        assert mundo["client"].get(url).json()["features"] == []
+        assert mundo["client"].get(url + "&verificacao=todas").status_code == 401
+
+        gestor = mundo["client"].get(
+            url + "&verificacao=todas", headers=H(mundo, "gestor1")
+        )
+        assert gestor.status_code == 200, gestor.text
+        assert gestor.json()["features"][0]["properties"]["total_ocorrencias"] == 3
+
+        outro_gestor = mundo["client"].get(
+            url + "&verificacao=todas", headers=H(mundo, "gestor2")
+        )
+        assert outro_gestor.status_code == 200, outro_gestor.text
+        assert outro_gestor.json()["features"] == []
+    finally:
+        if ids:
+            c.execute("DELETE FROM ocorrencias WHERE id_ocorrencia = ANY(%s)", (ids,))
+
+
+def test_clusters_rejeitam_parametros_invalidos(mundo):
+    base = "/ocorrencias/clusters"
+    assert mundo["client"].get(base).status_code == 422
+    assert mundo["client"].get(
+        base + "?lat_min=1&lat_max=0&lon_min=1&lon_max=2"
+    ).status_code == 422
+    assert mundo["client"].get(
+        base + "?lat_min=0&lat_max=3&lon_min=1&lon_max=2"
+    ).status_code == 422
+    assert mundo["client"].get(
+        base + "?lat_min=-23&lat_max=-22&lon_min=-46&lon_max=-45&tamanho_celula_m=5000"
+    ).status_code == 422

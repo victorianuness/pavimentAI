@@ -1,11 +1,12 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from pydantic import StringConstraints
 
 from .. import auditoria
 from ..config import settings
 from ..db import get_conn
-from ..acesso import exigir_acesso_a_ocorrencia
+from ..acesso import SQL_VERIFICADA, exigir_acesso_a_ocorrencia
 from ..deps import (
     checar_quem_pode_registrar,
     exigir_gestao_da_area,
@@ -13,7 +14,7 @@ from ..deps import (
     usuario_opcional,
 )
 from ..paginacao import paginar
-from ..schemas import OcorrenciaIn, OcorrenciaOut, PaginaOcorrencias
+from ..schemas import ClustersOut, OcorrenciaIn, OcorrenciaOut, PaginaOcorrencias
 
 router = APIRouter(prefix="/ocorrencias", tags=["Ocorrências"])
 
@@ -41,6 +42,28 @@ COLUNAS = """
 """
 
 MAX_GRAUS_MAPA = 10  # tamanho máximo da área pedida no mapa (em graus)
+MAX_GRAUS_CLUSTERS = 2  # limite mais estrito para as agregações regionais
+STATUS_CLUSTER = Literal["aberta", "resolvida", "descartada", "duplicada"]
+CATEGORIA_CLUSTER = Annotated[
+    str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,39}$", max_length=40)
+]
+
+
+def _srid_utm(lat_min: float, lat_max: float, lon_min: float, lon_max: float) -> int:
+    """Escolhe a zona UTM pelo centro da área consultada (hemisfério norte/sul)."""
+    centro_lat = (lat_min + lat_max) / 2
+    centro_lon = (lon_min + lon_max) / 2
+    zona = max(1, min(60, int((centro_lon + 180) // 6) + 1))
+    return (32600 if centro_lat >= 0 else 32700) + zona
+
+
+def _nivel_concentracao(total: int) -> str:
+    """Classificação operacional configurável; não representa risco ou perigo."""
+    if total >= settings.cluster_alerta_alto_min:
+        return "alta"
+    if total >= settings.cluster_alerta_moderado_min:
+        return "moderada"
+    return "normal"
 
 
 def _checar_tipo(conn, dados: OcorrenciaIn) -> None:
@@ -270,11 +293,7 @@ def mapa(
                                   %(lon_max)s::float8, %(lat_max)s::float8, 4326)::geography)
           AND (%(tipo)s::text IS NULL OR v.tipo = %(tipo)s::text)
           AND (%(id_area)s::int IS NULL OR v.id_area = %(id_area)s::int)
-          AND o.triagem_decisao IS DISTINCT FROM 'recusada'
-          AND (%(verif)s::text = 'todas'
-               OR NOT t.usa_ia
-               OR o.situacao_ia = 'confirmada'
-               OR o.triagem_decisao = 'aprovada')
+          AND (%(verif)s::text = 'todas' OR {SQL_VERIFICADA})
         ORDER BY v.criado_em DESC
         LIMIT %(limite)s
         """,
@@ -311,6 +330,211 @@ def mapa(
                 },
             }
             for r in linhas
+        ],
+    }
+
+
+@router.get("/clusters", response_model=ClustersOut)
+def clusters(
+    lat_min: Annotated[float, Query(ge=-80, le=84)],
+    lat_max: Annotated[float, Query(ge=-80, le=84)],
+    lon_min: Annotated[float, Query(ge=-180, le=180)],
+    lon_max: Annotated[float, Query(ge=-180, le=180)],
+    tamanho_celula_m: Annotated[int, Query(ge=50, le=1000)] = 250,
+    minimo_ocorrencias: Annotated[int, Query(ge=2, le=100)] = 3,
+    dias: Annotated[int, Query(ge=1, le=3650)] = 30,
+    limite: Annotated[int, Query(ge=1, le=2000)] = 500,
+    tipo: Annotated[str | None, Query(pattern=r"^[a-z][a-z0-9_]{1,19}$")] = None,
+    categorias: Annotated[list[CATEGORIA_CLUSTER] | None, Query(max_length=20)] = None,
+    status: Annotated[list[STATUS_CLUSTER], Query(max_length=4)] = ["aberta"],
+    id_area: Annotated[int | None, Query(ge=1)] = None,
+    verificacao: Literal["verificadas", "todas"] = "verificadas",
+    u=Depends(usuario_opcional),
+    conn=Depends(get_conn),
+):
+    """Agrupa ocorrências visíveis em células métricas para o mapa.
+
+    O nível indica concentração de relatos, não risco. `todas` segue as mesmas
+    permissões do mapa: apenas gestão, com gestores limitados à própria área.
+    """
+    if lat_min >= lat_max or lon_min >= lon_max:
+        raise HTTPException(422, "A área precisa ter lat_min < lat_max e lon_min < lon_max")
+    if lat_max - lat_min > MAX_GRAUS_CLUSTERS or lon_max - lon_min > MAX_GRAUS_CLUSTERS:
+        raise HTTPException(422, "Área muito grande para calcular clusters. Dê mais zoom no mapa.")
+    if categorias and len(set(categorias)) != len(categorias):
+        raise HTTPException(422, "Não repita categorias no filtro.")
+
+    if verificacao == "todas":
+        if u is None:
+            raise HTTPException(
+                401,
+                "Entre com uma conta de gestão para ver ocorrências ainda não verificadas.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if u["papel"] not in ("gestor", "admin"):
+            raise HTTPException(
+                403,
+                {"codigo": "so_gestao", "mensagem": "Só a gestão vê ocorrências ainda não verificadas."},
+            )
+        if u["papel"] == "gestor":
+            if u["id_area_gestao"] is None:
+                raise HTTPException(403, "Seu usuário de gestor ainda não está ligado a um município.")
+            if id_area is not None:
+                exigir_gestao_da_area(u, id_area)
+            id_area = u["id_area_gestao"]
+
+    srid = _srid_utm(lat_min, lat_max, lon_min, lon_max)
+    linhas = conn.execute(
+        f"""
+        WITH elegiveis AS (
+            SELECT o.tipo, o.categoria,
+                   COALESCE(o.gravidade_verificada, o.gravidade_cidadao, ia.gravidade_ia) AS gravidade,
+                   o.status, o.localizacao, o.id_area, o.criado_em,
+                   ST_Transform(o.localizacao::geometry, %(srid)s) AS ponto_metrico
+            FROM ocorrencias o
+            JOIN tipos_ocorrencia t ON t.codigo = o.tipo
+            LEFT JOIN LATERAL (
+                SELECT (ARRAY_AGG(d.gravidade_estimada ORDER BY
+                           CASE d.gravidade_estimada
+                               WHEN 'grave' THEN 3 WHEN 'moderado' THEN 2
+                               WHEN 'leve' THEN 1 ELSE 0
+                           END DESC))[1] AS gravidade_ia
+                FROM deteccoes_ia d WHERE d.id_ocorrencia = o.id_ocorrencia
+            ) ia ON true
+            WHERE ST_Intersects(
+                      o.localizacao,
+                      ST_MakeEnvelope(%(lon_min)s::float8, %(lat_min)s::float8,
+                                      %(lon_max)s::float8, %(lat_max)s::float8, 4326)::geography)
+              AND o.status = ANY(%(status)s::varchar[])
+              AND (%(tipo)s::text IS NULL OR o.tipo = %(tipo)s::text)
+              AND (%(categorias)s::text[] IS NULL OR o.categoria = ANY(%(categorias)s::text[]))
+              AND (%(id_area)s::int IS NULL OR o.id_area = %(id_area)s::int)
+              AND o.criado_em >= now() - make_interval(days => %(dias)s)
+              AND o.triagem_decisao IS DISTINCT FROM 'recusada'
+              AND (%(verif)s::text = 'todas'
+                   OR NOT t.usa_ia
+                   OR o.situacao_ia = 'confirmada'
+                   OR o.triagem_decisao = 'aprovada')
+        ),
+        bucketed AS (
+            SELECT floor(ST_X(ponto_metrico) / %(celula)s)::bigint AS coluna,
+                   floor(ST_Y(ponto_metrico) / %(celula)s)::bigint AS linha,
+                   tipo, categoria, gravidade, status
+            FROM elegiveis
+        ),
+        totais AS (
+            SELECT coluna, linha, count(*)::int AS total
+            FROM bucketed
+            GROUP BY coluna, linha
+            HAVING count(*) >= %(minimo)s
+        ),
+        tipos_por_categoria AS (
+            SELECT coluna, linha, tipo, categoria, count(*)::int AS total
+            FROM bucketed
+            GROUP BY coluna, linha, tipo, categoria
+        ),
+        tipos AS (
+            SELECT coluna, linha, tipo, sum(total)::int AS total,
+                   COALESCE(
+                       jsonb_object_agg(categoria, total) FILTER (WHERE categoria IS NOT NULL),
+                       '{{}}'::jsonb
+                   ) AS categorias
+            FROM tipos_por_categoria
+            GROUP BY coluna, linha, tipo
+        ),
+        resumo_tipos AS (
+            SELECT coluna, linha,
+                   jsonb_agg(jsonb_build_object(
+                       'tipo', tipo, 'total', total, 'categorias', categorias
+                   ) ORDER BY tipo) AS por_tipo
+            FROM tipos
+            GROUP BY coluna, linha
+        ),
+        gravidades AS (
+            SELECT coluna, linha, COALESCE(gravidade, 'sem_classificacao') AS chave,
+                   count(*)::int AS total
+            FROM bucketed
+            GROUP BY coluna, linha, COALESCE(gravidade, 'sem_classificacao')
+        ),
+        resumo_gravidades AS (
+            SELECT coluna, linha, jsonb_object_agg(chave, total) AS por_gravidade
+            FROM gravidades
+            GROUP BY coluna, linha
+        ),
+        status AS (
+            SELECT coluna, linha, status AS chave, count(*)::int AS total
+            FROM bucketed
+            GROUP BY coluna, linha, status
+        ),
+        resumo_status AS (
+            SELECT coluna, linha, jsonb_object_agg(chave, total) AS por_status
+            FROM status
+            GROUP BY coluna, linha
+        )
+        SELECT t.coluna, t.linha, t.total,
+               ST_X(ST_Transform(
+                   ST_SetSRID(ST_MakePoint(
+                       (t.coluna + 0.5) * %(celula)s,
+                       (t.linha + 0.5) * %(celula)s
+                   ), %(srid)s), 4326)) AS longitude,
+               ST_Y(ST_Transform(
+                   ST_SetSRID(ST_MakePoint(
+                       (t.coluna + 0.5) * %(celula)s,
+                       (t.linha + 0.5) * %(celula)s
+                   ), %(srid)s), 4326)) AS latitude,
+               rt.por_tipo, rg.por_gravidade, rs.por_status
+        FROM totais t
+        JOIN resumo_tipos rt USING (coluna, linha)
+        JOIN resumo_gravidades rg USING (coluna, linha)
+        JOIN resumo_status rs USING (coluna, linha)
+        ORDER BY t.total DESC, t.coluna, t.linha
+        LIMIT (%(limite)s + 1)
+        """,
+        {
+            "lat_min": lat_min,
+            "lat_max": lat_max,
+            "lon_min": lon_min,
+            "lon_max": lon_max,
+            "srid": srid,
+            "celula": tamanho_celula_m,
+            "minimo": minimo_ocorrencias,
+            "dias": dias,
+            "limite": limite,
+            "tipo": tipo,
+            "categorias": categorias,
+            "status": status,
+            "id_area": id_area,
+            "verif": verificacao,
+        },
+    ).fetchall()
+
+    return {
+        "type": "FeatureCollection",
+        "tamanho_celula_m": tamanho_celula_m,
+        "minimo_ocorrencias": minimo_ocorrencias,
+        "periodo_dias": dias,
+        "srid_metrico": srid,
+        "limite_clusters": limite,
+        "truncado": len(linhas) > limite,
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [r["longitude"], r["latitude"]],
+                },
+                "properties": {
+                    "referencia_espacial": (
+                        f"epsg:{srid}:{tamanho_celula_m}:{r['coluna']}:{r['linha']}"
+                    ),
+                    "total_ocorrencias": r["total"],
+                    "nivel_concentracao": _nivel_concentracao(r["total"]),
+                    "por_tipo": r["por_tipo"],
+                    "por_gravidade": r["por_gravidade"],
+                    "por_status": r["por_status"],
+                },
+            }
+            for r in linhas[:limite]
         ],
     }
 

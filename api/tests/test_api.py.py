@@ -11,6 +11,7 @@ os.environ.setdefault("DB_PASSWORD", "senha_teste_ci_12345")
 os.environ.setdefault("JWT_SECRET", "chave_secreta_de_teste_com_mais_de_32_caracteres_123456")
 
 from app import imagens, schemas, seguranca, servico_yolo
+from app.routers.ocorrencias import _nivel_concentracao
 
 
 # =====================================================================
@@ -72,6 +73,12 @@ def test_regras_mudanca_status_descarte_e_duplicada():
 
     valido = schemas.MudarStatusIn(status="duplicada", id_ocorrencia_principal=10)
     assert valido.id_ocorrencia_principal == 10
+
+
+def test_nivel_concentracao_usa_limites_documentados():
+    assert _nivel_concentracao(3) == "normal"
+    assert _nivel_concentracao(5) == "moderada"
+    assert _nivel_concentracao(10) == "alta"
 
 
 # =====================================================================

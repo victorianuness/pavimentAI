@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     janela_foto_min: int = 15  # a foto só vale até X minutos depois de registrar a ocorrência
     raio_foto_m: int = 100     # o aparelho precisa estar a menos de X metros da ocorrência
 
+    # Clusters do mapa. Estes limites descrevem concentração de relatos, não risco.
+    cluster_alerta_moderado_min: int = Field(default=5, ge=3, le=10000)
+    cluster_alerta_alto_min: int = Field(default=10, ge=3, le=10000)
+
     # Pasta onde as fotos ficam guardadas (por padrão: api/uploads).
     uploads_dir: Path = Path(__file__).resolve().parents[1] / "uploads"
 
@@ -72,6 +76,14 @@ class Settings(BaseSettings):
     smtp_usuario: str | None = None
     smtp_senha: str | None = None
     smtp_remetente: str | None = None
+
+    @model_validator(mode="after")
+    def validar_limites_de_cluster(self):
+        if self.cluster_alerta_moderado_min >= self.cluster_alerta_alto_min:
+            raise ValueError(
+                "CLUSTER_ALERTA_MODERADO_MIN precisa ser menor que CLUSTER_ALERTA_ALTO_MIN"
+            )
+        return self
 
 
 settings = Settings()

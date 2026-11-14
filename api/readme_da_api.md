@@ -35,6 +35,63 @@ python -m uvicorn app.main:app --reload
 - **Healthcheck (Banco + PostGIS):** `http://127.0.0.1:8000/saude`
 - **Aplicação Web Integrada (SPA):** `http://127.0.0.1:8000/web/`
 
+## Clusters regionais do mapa
+
+`GET /ocorrencias/clusters` agrupa ocorrências visíveis ao usuário em células quadradas métricas, calculadas no PostGIS. Foi escolhida uma grade regular (em vez de DBSCAN) porque fornece células estáveis, fáceis de resumir e adequadas ao mapa existente. A consulta escolhe a zona UTM pelo centro da área consultada, transforma os pontos para essa projeção apenas para formar as células e devolve o centro de cada célula em longitude/latitude (EPSG:4326). O filtro espacial continua aplicado à coluna `geography` indexada, sem transformá-la.
+
+Exemplo:
+
+```text
+/ocorrencias/clusters?lat_min=-23.72&lat_max=-23.62&lon_min=-46.51&lon_max=-46.41&tamanho_celula_m=250&minimo_ocorrencias=3&dias=30
+```
+
+Parâmetros:
+
+| Parâmetro | Padrão | Limites / comportamento |
+| :--- | :--- | :--- |
+| `lat_min`, `lat_max`, `lon_min`, `lon_max` | Obrigatórios | Limites da área visível; máximo de 2 graus em cada eixo para limitar o custo da agregação. |
+| `tamanho_celula_m` | 250 | 50 a 1.000 metros. |
+| `minimo_ocorrencias` | 3 | 2 a 100 por célula. |
+| `dias` | 30 | Janela de 1 a 3.650 dias. |
+| `limite` | 500 | Máximo de features retornadas, entre 1 e 2.000; `truncado` indica se há mais resultados. |
+| `tipo` | Todos | Código de tipo do catálogo, por exemplo `buraco`. |
+| `categorias` | Todas | Pode ser repetido; ex.: `categorias=travessia&categorias=piso_tatil`. |
+| `status` | `aberta` | Pode ser repetido para incluir status como `resolvida`. |
+| `id_area` | Todas | Limita os resultados a uma área. |
+| `verificacao` | `verificadas` | `todas` exige gestão; gestores veem somente a própria área. |
+
+A resposta é um `FeatureCollection` GeoJSON. Cada `Feature` contém o centro da célula e `properties` com referência espacial, total, totais por tipo/categoria, gravidade e status, além de `nivel_concentracao`. Os níveis usam limites configuráveis em `CLUSTER_ALERTA_MODERADO_MIN` e `CLUSTER_ALERTA_ALTO_MIN` (padrões 5 e 10). São heurísticas de concentração de relatos; não são limites científicos, previsão de acidentes ou classificação de perigo. Gravidades não comparáveis, como as de ocorrências de acessibilidade, são contabilizadas como `sem_classificacao`.
+
+Exemplo reduzido de resposta:
+
+```json
+{
+  "type": "FeatureCollection",
+  "tamanho_celula_m": 250,
+  "minimo_ocorrencias": 3,
+  "periodo_dias": 30,
+  "srid_metrico": 32723,
+  "limite_clusters": 500,
+  "truncado": false,
+  "features": [{
+    "type": "Feature",
+    "geometry": {"type": "Point", "coordinates": [-46.42, -23.70]},
+    "properties": {
+      "referencia_espacial": "epsg:32723:250:-186:258",
+      "total_ocorrencias": 3,
+      "nivel_concentracao": "normal",
+      "por_tipo": [{"tipo": "acessibilidade", "total": 3, "categorias": {"travessia": 3}}],
+      "por_gravidade": {"sem_classificacao": 3},
+      "por_status": {"aberta": 3}
+    }
+  }]
+}
+```
+
+A regra de visibilidade segue o mapa existente: ocorrências verificadas são públicas; `verificacao=todas` inclui registros não verificados somente para gestão. O endpoint não expõe dados pessoais, fotos ou detecções como linhas independentes. A grade não é um agrupamento por distância: pontos em lados opostos da borda de uma célula podem ficar separados; a posição do marcador é o centro da célula, não o centroide dos relatos. O cálculo UTM é limitado à faixa entre 80°S e 84°N. Não há migração adicional; o índice GiST existente na localização é usado no filtro da área.
+
+Para validar a implementação, rode `pytest tests/test_api.py.py tests/test_contrato_dia1.py` dentro de `api`. Os testes de rota exigem o banco de integração PostGIS descrito em `tests/conftest.py`; sem `TEST_ADMIN_DSN` ou sem um banco cujo nome termine em `_teste`, eles serão ignorados e não contarão como validação de integração.
+
 ## Scripts Utilitários (`api/scripts/`)
 
 | Script | Finalidade |

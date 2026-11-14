@@ -114,6 +114,20 @@
             <option value="verificadas">Confirmadas (IA / Gestor)</option>
             <option value="todas">Todas abertas (inclui em triagem)</option>
           </select>
+
+          <label class="font-medium text-slate-600 ml-1">Período dos clusters:</label>
+          <select id="filtro-cluster-dias" onchange="carregarMapaOcorrencias()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="7">7 dias</option>
+            <option value="30" selected>30 dias</option>
+            <option value="90">90 dias</option>
+          </select>
+
+          <label class="font-medium text-slate-600 ml-1">Célula dos clusters:</label>
+          <select id="filtro-cluster-celula" onchange="carregarMapaOcorrencias()" class="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white">
+            <option value="100">100 m</option>
+            <option value="250" selected>250 m</option>
+            <option value="500">500 m</option>
+          </select>
         </div>
 
         <div class="flex items-center gap-3 text-xs">
@@ -121,6 +135,7 @@
           <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Moderado</span>
           <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-600 inline-block"></span> Leve</span>
           <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span> Acessibilidade/Outro</span>
+          <span id="mapa-estado" role="status" class="text-slate-500"></span>
           <button onclick="carregarMapaOcorrencias()" class="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 font-semibold text-slate-700">
             Atualizar
           </button>
@@ -662,10 +677,14 @@
     let mapa = null;
     let camadaAreasGeoJSON = null;
     let camadaMarcadores = null;
+    let camadaClusters = null;
     let marcadorSelecao = null;
     let mapaPreviaAdmin = null;
     let camadaPreviaAdmin = null;
     let codigoIbgePreviaAtual = null;
+    let mapaAtualizacaoTimer = null;
+    let mapaRequisicaoAtual = 0;
+    let mapaAbortController = null;
 
     // -------------------- UTILITÁRIOS DE REDE E UI --------------------
     function toast(msg, tipo = 'info') {
@@ -785,6 +804,7 @@
 
       camadaAreasGeoJSON = L.layerGroup().addTo(mapa);
       camadaMarcadores = L.layerGroup().addTo(mapa);
+      camadaClusters = L.layerGroup().addTo(mapa);
 
       mapa.on('moveend', () => carregarMapaOcorrencias());
       mapa.on('click', (e) => {
@@ -874,8 +894,20 @@
       });
     }
 
-    async function carregarMapaOcorrencias() {
+    function carregarMapaOcorrencias() {
+      clearTimeout(mapaAtualizacaoTimer);
+      mapaAtualizacaoTimer = setTimeout(atualizarMapaOcorrencias, 200);
+    }
+
+    async function atualizarMapaOcorrencias() {
       if (!mapa) return;
+      if (mapaAbortController) mapaAbortController.abort();
+      const controller = new AbortController();
+      mapaAbortController = controller;
+      const requisicao = ++mapaRequisicaoAtual;
+      const estado = document.getElementById('mapa-estado');
+      estado.textContent = 'Carregando mapa...';
+
       // "Todas (inclui triagem)" é só da gestão; quem não é gestor volta para as verificadas
       const selVerif = document.getElementById('filtro-mapa-verif');
       const ehGestao = usuarioLogado && ['gestor', 'admin'].includes(usuarioLogado.papel);
@@ -891,23 +923,71 @@
         lon_max: Math.min(180, b.getEast()).toFixed(6),
         verificacao: document.getElementById('filtro-mapa-verif').value
       });
+      const paramsClusters = new URLSearchParams(params);
+      paramsClusters.set('dias', document.getElementById('filtro-cluster-dias').value);
+      paramsClusters.set('tamanho_celula_m', document.getElementById('filtro-cluster-celula').value);
       const idArea = document.getElementById('filtro-mapa-area').value;
       const tipo = document.getElementById('filtro-mapa-tipo').value;
-      if (idArea) params.set('id_area', idArea);
-      if (tipo) params.set('tipo', tipo);
+      if (idArea) {
+        params.set('id_area', idArea);
+        paramsClusters.set('id_area', idArea);
+      }
+      if (tipo) {
+        params.set('tipo', tipo);
+        paramsClusters.set('tipo', tipo);
+      }
 
       try {
-        const geo = await api(`/ocorrencias/mapa?${params.toString()}`);
-        camadaMarcadores.clearLayers();
-        (geo.features || []).forEach(f => {
-          const [lon, lat] = f.geometry.coordinates;
-          const p = f.properties;
-          const marker = L.marker([lat, lon], { icon: iconePorGravidade(p.gravidade, p.tipo) });
-          marker.on('click', () => abrirModalOcorrencia(p.id_ocorrencia));
-          marker.addTo(camadaMarcadores);
-        });
+        const zoomComClusters = mapa.getZoom() < 15;
+        if (zoomComClusters) {
+          const geo = await api(`/ocorrencias/clusters?${paramsClusters.toString()}`, { signal: controller.signal });
+          if (requisicao !== mapaRequisicaoAtual) return;
+          camadaClusters.clearLayers();
+          camadaMarcadores.clearLayers();
+          (geo.features || []).forEach(f => {
+            const [lon, lat] = f.geometry.coordinates;
+            const p = f.properties;
+            const corTipo = p.por_tipo.some(t => t.tipo === 'buraco') ? '#d97706' : '#2563eb';
+            const corNivel = { alta: '#dc2626', moderada: '#d97706', normal: '#2563eb' }[p.nivel_concentracao] || '#475569';
+            const icone = L.divIcon({
+              className: 'cluster-div-icon',
+              html: `<div title="${escaparHTML(p.nivel_concentracao)}" style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${corTipo};border:3px solid ${corNivel};color:white;font-weight:800;box-shadow:0 2px 6px #0006">${p.total_ocorrencias}</div>`,
+              iconSize: [42, 42],
+              iconAnchor: [21, 21]
+            });
+            const linhasTipo = p.por_tipo.map(t => {
+              const nome = catalogoTipos.find(item => item.codigo === t.tipo)?.nome || t.tipo;
+              const categorias = Object.entries(t.categorias).map(([nomeCat, total]) =>
+                `${escaparHTML(nomeCat)}: ${total}`).join(', ');
+              return `<li>${escaparHTML(nome)}: <b>${t.total}</b>${categorias ? ` (${categorias})` : ''}</li>`;
+            }).join('');
+            const gravidades = Object.entries(p.por_gravidade)
+              .map(([nome, total]) => `${escaparHTML(nome)}: ${total}`).join(', ');
+            const popup = `<div class="text-xs space-y-1"><b>Concentração ${escaparHTML(p.nivel_concentracao)}</b><br>${p.total_ocorrencias} ocorrências na célula<br><ul class="list-disc pl-4">${linhasTipo}</ul><span>Gravidade: ${gravidades}</span><br><span class="text-slate-500">Agrupamento de relatos; não representa risco ou total real de problemas.</span></div>`;
+            L.marker([lat, lon], { icon: icone }).bindPopup(popup).addTo(camadaClusters);
+          });
+          estado.textContent = geo.features?.length
+            ? `${geo.features.length} clusters${geo.truncado ? ' · resultados limitados' : ''} · mínimo de 3 ocorrências`
+            : 'Nenhum cluster neste período e área.';
+        } else {
+          const geo = await api(`/ocorrencias/mapa?${params.toString()}`, { signal: controller.signal });
+          if (requisicao !== mapaRequisicaoAtual) return;
+          camadaClusters.clearLayers();
+          camadaMarcadores.clearLayers();
+          (geo.features || []).forEach(f => {
+            const [lon, lat] = f.geometry.coordinates;
+            const p = f.properties;
+            const marker = L.marker([lat, lon], { icon: iconePorGravidade(p.gravidade, p.tipo) });
+            marker.on('click', () => abrirModalOcorrencia(p.id_ocorrencia));
+            marker.addTo(camadaMarcadores);
+          });
+          estado.textContent = `${geo.features?.length || 0} ocorrências`;
+        }
       } catch (e) {
-        // Ignora erro 422 quando o zoom estiver muito distante (>10 graus)
+        if (e.name === 'AbortError' || requisicao !== mapaRequisicaoAtual) return;
+        camadaClusters.clearLayers();
+        camadaMarcadores.clearLayers();
+        estado.textContent = `Não foi possível carregar o mapa: ${e.message}`;
       }
     }
 

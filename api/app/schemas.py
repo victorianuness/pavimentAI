@@ -193,6 +193,43 @@ class PaginaOcorrencias(BaseModel):
     itens: list[OcorrenciaOut]
 
 
+class ClusterTipoOut(BaseModel):
+    tipo: str
+    total: int
+    categorias: dict[str, int]
+
+
+class ClusterPropriedadesOut(BaseModel):
+    referencia_espacial: str
+    total_ocorrencias: int
+    nivel_concentracao: Literal["normal", "moderada", "alta"]
+    por_tipo: list[ClusterTipoOut]
+    por_gravidade: dict[str, int]
+    por_status: dict[str, int]
+
+
+class ClusterGeometriaOut(BaseModel):
+    type: Literal["Point"] = "Point"
+    coordinates: tuple[float, float]
+
+
+class ClusterFeatureOut(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    geometry: ClusterGeometriaOut
+    properties: ClusterPropriedadesOut
+
+
+class ClustersOut(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    tamanho_celula_m: int
+    minimo_ocorrencias: int
+    periodo_dias: int
+    srid_metrico: int
+    limite_clusters: int
+    truncado: bool
+    features: list[ClusterFeatureOut]
+
+
 # -------------------------------------------------------------------- fotos
 class FotoOut(BaseModel):
     id_midia: int

@@ -12,3 +12,7 @@ Copy-Item api\.env.example api\.env
 Edite ambos e substitua os valores `troque_...`; gere um `JWT_SECRET` novo usando o comando indicado em `api\.env.example`. Use senhas fortes sem espaços para evitar problemas com a interpolação do Docker Compose. O `.env` da raiz configura a senha do usuário `postgres` do contêiner; `api\.env` configura as credenciais e opções da API. Não reutilize senhas de produção nos exemplos nem nos arquivos enviados ao repositório.
 
 Para executar a API diretamente na máquina, crie também `api\.env` a partir de `api\.env.example`. Consulte [api/readme_da_api.md](api/readme_da_api.md) para os passos de inicialização.
+
+## Clusters regionais no mapa
+
+O mapa agrupa ocorrências visíveis em células métricas PostGIS. A classificação indica concentração de relatos — não perigo nem incidência real de problemas. O endpoint, parâmetros, filtros e limitações estão documentados em [api/readme_da_api.md](api/readme_da_api.md).
