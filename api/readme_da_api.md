@@ -35,6 +35,12 @@ pavimentai
 - **Healthcheck (Banco + PostGIS):** `http://127.0.0.1:8000/saude`
 - **Aplicação Web Integrada (SPA):** `http://127.0.0.1:8000/web/`
 
+### Sessões e tokens de autenticação
+
+`POST /auth/login` devolve um access token de curta duração e um refresh token aleatório. A API guarda somente o hash do refresh token na tabela `sessoes`. Use `POST /auth/refresh` com `{"refresh_token": "..."}` para trocar o refresh token por um novo par; cada refresh invalida o token anterior. `POST /auth/logout` recebe o refresh token atual e revoga a sessão, invalidando também seus access tokens.
+
+Alterar ou redefinir a senha revoga todas as sessões da conta. A migração v11 cria a tabela e as permissões necessárias; aplique-a antes de iniciar uma versão da API com esse fluxo.
+
 ## Clusters regionais do mapa
 
 `GET /ocorrencias/clusters` agrupa ocorrências visíveis ao usuário em células quadradas métricas, calculadas no PostGIS. Foi escolhida uma grade regular (em vez de DBSCAN) porque fornece células estáveis, fáceis de resumir e adequadas ao mapa existente. A consulta escolhe a zona UTM pelo centro da área consultada, transforma os pontos para essa projeção apenas para formar as células e devolve o centro de cada célula em longitude/latitude (EPSG:4326). O filtro espacial continua aplicado à coluna `geography` indexada, sem transformá-la.

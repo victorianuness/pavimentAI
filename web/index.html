@@ -668,6 +668,8 @@
       : (localStorage.getItem('PAVIMENTAI_API_URL') || 'http://127.0.0.1:8000');
 
     let tokenJWT = localStorage.getItem('PAVIMENTAI_TOKEN') || null;
+    let refreshToken = localStorage.getItem('PAVIMENTAI_REFRESH_TOKEN') || null;
+    let refreshPromise = null;
     let usuarioLogado = null;
     let catalogoTipos = [];
     let areasAtendidas = [];
@@ -713,7 +715,15 @@
         headers['Content-Type'] = 'application/json';
         opcoes.body = JSON.stringify(opcoes.json);
       }
-      const resp = await fetch(`${API_BASE}${caminho}`, { ...opcoes, headers });
+      const enviar = () => fetch(`${API_BASE}${caminho}`, { ...opcoes, headers });
+      let resp = await enviar();
+      if (resp.status === 401 && refreshToken &&
+          !['/auth/login', '/auth/refresh', '/auth/logout'].includes(caminho)) {
+        if (await renovarAccessToken()) {
+          headers['Authorization'] = `Bearer ${tokenJWT}`;
+          resp = await enviar();
+        }
+      }
       let dados = null;
       const contentType = resp.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
@@ -729,6 +739,45 @@
         throw err;
       }
       return dados;
+    }
+
+    function salvarTokens(access, refresh) {
+      tokenJWT = access;
+      refreshToken = refresh;
+      localStorage.setItem('PAVIMENTAI_TOKEN', tokenJWT);
+      localStorage.setItem('PAVIMENTAI_REFRESH_TOKEN', refreshToken);
+    }
+
+    function limparTokens() {
+      tokenJWT = null;
+      refreshToken = null;
+      localStorage.removeItem('PAVIMENTAI_TOKEN');
+      localStorage.removeItem('PAVIMENTAI_REFRESH_TOKEN');
+    }
+
+    async function renovarAccessToken() {
+      if (!refreshPromise) {
+        refreshPromise = (async () => {
+          const resp = await fetch(`${API_BASE}/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken })
+          });
+          const dados = await resp.json();
+          if (resp.status === 401) {
+            limparTokens();
+            return false;
+          }
+          if (!resp.ok) throw new Error(dados?.mensagem || `Erro HTTP ${resp.status} ao renovar a sessão`);
+          salvarTokens(dados.access_token, dados.refresh_token);
+          return true;
+        })();
+      }
+      try {
+        return await refreshPromise;
+      } finally {
+        refreshPromise = null;
+      }
     }
 
     // Fotos de ocorrências ainda não verificadas exigem login, e <img src> não envia o token.
@@ -1019,9 +1068,12 @@
         const u = await api('/auth/eu');
         atualizarMenuSessao(u);
       } catch (e) {
-        tokenJWT = null;
-        localStorage.removeItem('PAVIMENTAI_TOKEN');
-        atualizarMenuSessao(null);
+        if (e.status === 401) {
+          limparTokens();
+          atualizarMenuSessao(null);
+          return;
+        }
+        throw e;
       }
     }
 
@@ -1068,8 +1120,7 @@
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body
         });
-        tokenJWT = res.access_token;
-        localStorage.setItem('PAVIMENTAI_TOKEN', tokenJWT);
+        salvarTokens(res.access_token, res.refresh_token);
         fecharModalAuth();
         await carregarUsuarioAtual();
         toast('Sessão iniciada com sucesso!', 'sucesso');
@@ -1158,12 +1209,26 @@
       }
     }
 
-    function logout() {
-      tokenJWT = null;
-      localStorage.removeItem('PAVIMENTAI_TOKEN');
+    async function logout() {
+      let erroRevogacao = null;
+      if (refreshToken) {
+        try {
+          const resp = await fetch(`${API_BASE}/auth/logout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken })
+          });
+          if (!resp.ok) throw new Error(`Erro HTTP ${resp.status}`);
+        } catch (err) {
+          erroRevogacao = err;
+        }
+      }
+      limparTokens();
       atualizarMenuSessao(null);
       navegar('mapa');
-      toast('Você saiu da sua conta.');
+      toast(erroRevogacao
+        ? 'Você saiu deste dispositivo, mas não foi possível revogar a sessão no servidor.'
+        : 'Você saiu da sua conta.', erroRevogacao ? 'aviso' : 'info');
     }
 
     // -------------------- COMPRESSÃO DE IMAGEM EM CANVAS (CLIENT-SIDE) --------------------
@@ -1559,6 +1624,9 @@
             senha_nova: document.getElementById('senha-nova').value
           }
         });
+        limparTokens();
+        atualizarMenuSessao(null);
+        navegar('mapa');
         toast(res.mensagem, 'sucesso');
         e.target.reset();
       } catch (err) {
@@ -2014,7 +2082,12 @@
     // -------------------- BOOTSTRAP INICIAL --------------------
     window.addEventListener('DOMContentLoaded', async () => {
       inicializarMapa();
-      await carregarUsuarioAtual();
+      try {
+        await carregarUsuarioAtual();
+      } catch (err) {
+        atualizarMenuSessao(null);
+        toast(`Não foi possível validar a sessão: ${err.message}`, 'erro');
+      }
       await carregarAreasETiposIniciais();
     });
   </script>

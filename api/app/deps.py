@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 
 from .db import get_conn
-from .seguranca import ler_token
+from .seguranca import ler_token_com_sessao
 
 oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # Para rotas públicas que mostram mais coisas a quem está logado (sem exigir login)
@@ -28,15 +28,25 @@ def usuario_atual(token: str = Depends(oauth2), conn=Depends(get_conn)):
         "Token inválido ou expirado",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    id_usuario = ler_token(token)
-    if id_usuario is None:
+    identidade = ler_token_com_sessao(token)
+    if identidade is None:
         raise erro
+    id_usuario, id_sessao = identidade
     u = conn.execute(
-        f"SELECT {COLUNAS_USUARIO} FROM usuarios WHERE id_usuario = %s",
-        (id_usuario,),
+        f"""
+        SELECT {COLUNAS_USUARIO} FROM usuarios
+        WHERE id_usuario = %s AND status_conta = 'ativa'
+          AND EXISTS (
+              SELECT 1 FROM sessoes
+              WHERE id_sessao = %s AND id_usuario = %s
+                AND revogada_em IS NULL AND expira_em > now()
+          )
+        """,
+        (id_usuario, id_sessao, id_usuario),
     ).fetchone()
-    if u is None or u["status_conta"] != "ativa":
+    if u is None:
         raise erro
+    u["id_sessao"] = id_sessao
     return u
 
 
@@ -45,15 +55,25 @@ def usuario_opcional(token: str | None = Depends(oauth2_opcional), conn=Depends(
     Token ausente, inválido ou de conta suspensa conta como visitante."""
     if not token:
         return None
-    id_usuario = ler_token(token)
-    if id_usuario is None:
+    identidade = ler_token_com_sessao(token)
+    if identidade is None:
         return None
+    id_usuario, id_sessao = identidade
     u = conn.execute(
-        f"SELECT {COLUNAS_USUARIO} FROM usuarios WHERE id_usuario = %s",
-        (id_usuario,),
+        f"""
+        SELECT {COLUNAS_USUARIO} FROM usuarios
+        WHERE id_usuario = %s AND status_conta = 'ativa'
+          AND EXISTS (
+              SELECT 1 FROM sessoes
+              WHERE id_sessao = %s AND id_usuario = %s
+                AND revogada_em IS NULL AND expira_em > now()
+          )
+        """,
+        (id_usuario, id_sessao, id_usuario),
     ).fetchone()
-    if u is None or u["status_conta"] != "ativa":
+    if u is None:
         return None
+    u["id_sessao"] = id_sessao
     return u
 
 

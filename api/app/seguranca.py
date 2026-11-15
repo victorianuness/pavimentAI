@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import jwt
 from pwdlib import PasswordHash
@@ -40,7 +41,7 @@ def hash_codigo(id_usuario: int, codigo: str) -> str:
     return hmac.new(_HMAC_KEY, msg, hashlib.sha256).hexdigest()
 
 
-def criar_token(id_usuario: int) -> str:
+def criar_token(id_usuario: int, id_sessao: str | None = None) -> str:
     agora = datetime.now(timezone.utc)
     payload = {
         "sub": str(id_usuario),
@@ -48,7 +49,31 @@ def criar_token(id_usuario: int) -> str:
         "iat": agora,
         "exp": agora + timedelta(minutes=settings.jwt_expira_minutos),
     }
+    if id_sessao is not None:
+        payload["sid"] = id_sessao
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def ler_token_com_sessao(token: str) -> tuple[int, UUID] | None:
+    """Devolve o usuário e a sessão do access token, ou None se não for válido."""
+    try:
+        dados = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["sub", "sid", "exp", "iat"]},
+        )
+        return int(dados["sub"]), UUID(dados["sid"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def gerar_refresh_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def ler_token(token: str) -> int | None:

@@ -16,6 +16,7 @@ from ..schemas import (
     CadastroIn,
     ConfirmarSenhaIn,
     EsqueciSenhaIn,
+    RefreshTokenIn,
     RedefinirSenhaIn,
     ReenviarIn,
     ResidenciaIn,
@@ -28,6 +29,8 @@ from ..seguranca import (
     criar_token,
     gerar_codigo_6_digitos,
     gerar_hash_senha,
+    gerar_refresh_token,
+    hash_refresh_token,
     hash_codigo,
     verificar_senha,
 )
@@ -38,6 +41,14 @@ router = APIRouter(prefix="/auth", tags=["Autenticação"])
 MAX_TENTATIVAS = 5
 VALIDADE_CODIGO_MIN = 15
 INTERVALO_REENVIO_SEG = 60
+VALIDADE_REFRESH_DIAS = 30
+
+
+def _revogar_sessoes(conn, id_usuario: int) -> None:
+    conn.execute(
+        "UPDATE sessoes SET revogada_em = now() WHERE id_usuario = %s AND revogada_em IS NULL",
+        (id_usuario,),
+    )
 
 
 def _criar_codigo_email(
@@ -227,8 +238,63 @@ def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), conn=De
     if u["status_conta"] != "ativa":
         raise HTTPException(403, "Conta suspensa ou desativada")
 
+    refresh_token = gerar_refresh_token()
+    sessao = conn.execute(
+        """
+        INSERT INTO sessoes (id_usuario, refresh_token_hash, expira_em)
+        VALUES (%s, %s, now() + make_interval(days => %s))
+        RETURNING id_sessao
+        """,
+        (u["id_usuario"], hash_refresh_token(refresh_token), VALIDADE_REFRESH_DIAS),
+    ).fetchone()
     auditoria.registrar(conn, "login", u["id_usuario"], "usuarios", u["id_usuario"])
-    return TokenOut(access_token=criar_token(u["id_usuario"]))
+    return TokenOut(
+        access_token=criar_token(u["id_usuario"], str(sessao["id_sessao"])),
+        refresh_token=refresh_token,
+    )
+
+
+@router.post("/refresh", response_model=TokenOut)
+def refresh(dados: RefreshTokenIn, conn=Depends(get_conn)):
+    sessao = conn.execute(
+        """
+        SELECT s.id_sessao, s.id_usuario
+        FROM sessoes s
+        JOIN usuarios u ON u.id_usuario = s.id_usuario
+        WHERE s.refresh_token_hash = %s AND s.revogada_em IS NULL
+          AND s.expira_em > now() AND u.status_conta = 'ativa'
+        FOR UPDATE OF s
+        """,
+        (hash_refresh_token(dados.refresh_token),),
+    ).fetchone()
+    if sessao is None:
+        raise HTTPException(401, "Refresh token inválido ou expirado")
+
+    refresh_token = gerar_refresh_token()
+    conn.execute(
+        """
+        UPDATE sessoes
+        SET refresh_token_hash = %s, expira_em = now() + make_interval(days => %s)
+        WHERE id_sessao = %s
+        """,
+        (hash_refresh_token(refresh_token), VALIDADE_REFRESH_DIAS, sessao["id_sessao"]),
+    )
+    return TokenOut(
+        access_token=criar_token(sessao["id_usuario"], str(sessao["id_sessao"])),
+        refresh_token=refresh_token,
+    )
+
+
+@router.post("/logout")
+def logout(dados: RefreshTokenIn, conn=Depends(get_conn)):
+    conn.execute(
+        """
+        UPDATE sessoes SET revogada_em = now()
+        WHERE refresh_token_hash = %s AND revogada_em IS NULL
+        """,
+        (hash_refresh_token(dados.refresh_token),),
+    )
+    return {"mensagem": "Sessão encerrada."}
 
 
 @router.put("/residencia", response_model=UsuarioOut)
@@ -337,6 +403,7 @@ def trocar_senha(dados: TrocarSenhaIn, u=Depends(usuario_atual), conn=Depends(ge
         "UPDATE usuarios SET hash_senha = %s WHERE id_usuario = %s",
         (gerar_hash_senha(dados.senha_nova), u["id_usuario"]),
     )
+    _revogar_sessoes(conn, u["id_usuario"])
     auditoria.registrar(conn, "senha_alterada", u["id_usuario"], "usuarios", u["id_usuario"])
     return {"mensagem": "Senha alterada."}
 
@@ -346,6 +413,7 @@ def excluir_conta(dados: ConfirmarSenhaIn, u=Depends(usuario_atual), conn=Depend
     if u["papel"] != "cidadao":
         raise HTTPException(403, "Contas de gestor e admin são encerradas pelo admin da plataforma.")
     _confirmar_senha(conn, u, dados.senha)
+    _revogar_sessoes(conn, u["id_usuario"])
     conn.execute(
         "SELECT anonimizar_usuario(%s, %s)",
         (u["id_usuario"], gerar_hash_senha(secrets.token_urlsafe(32))),
@@ -465,5 +533,6 @@ def redefinir_senha(dados: RedefinirSenhaIn, conn=Depends(get_conn)):
         "UPDATE recuperacoes_senha SET usado_em = now() WHERE id_recuperacao = %s",
         (r["id_recuperacao"],),
     )
+    _revogar_sessoes(conn, u["id_usuario"])
     auditoria.registrar(conn, "senha_redefinida", u["id_usuario"], "usuarios", u["id_usuario"])
     return {"mensagem": "Senha alterada. Entre com a senha nova."}

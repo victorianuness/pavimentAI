@@ -1,6 +1,7 @@
 import io
 import os
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 import pytest
 from PIL import Image
@@ -31,6 +32,17 @@ def test_geracao_e_leitura_jwt():
     assert seguranca.ler_token(token) == 42
     assert seguranca.ler_token(token + "adulterado") is None
     assert seguranca.ler_token("token.invalido.aqui") is None
+
+
+def test_access_token_vinculado_a_sessao_e_refresh_hash():
+    id_sessao = "0ea2a4c4-9747-4e8f-a1da-9a7f6d78e4ab"
+    access = seguranca.criar_token(42, id_sessao)
+    refresh = seguranca.gerar_refresh_token()
+
+    assert seguranca.ler_token_com_sessao(access) == (42, UUID(id_sessao))
+    assert seguranca.ler_token_com_sessao(seguranca.criar_token(42)) is None
+    assert seguranca.hash_refresh_token(refresh) != refresh
+    assert seguranca.hash_refresh_token(refresh) == seguranca.hash_refresh_token(refresh)
 
 
 def test_codigo_6_digitos_e_hmac():

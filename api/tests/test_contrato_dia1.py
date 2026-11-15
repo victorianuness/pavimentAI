@@ -1,5 +1,7 @@
 """Testes do contrato fechado no Dia 1: erros {codigo, mensagem}, paginação em envelope,
 acesso a ocorrência/fotos e filtro 'todas' do mapa só para a gestão."""
+from uuid import uuid4
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -91,6 +93,77 @@ def mundo(admin_conn, tmp_path_factory):
 
 def H(mundo, nome):
     return mundo["tokens"][nome]
+
+
+def _criar_usuario_sessoes(admin_conn):
+    identificador = uuid4().hex
+    email = f"sessoes-{identificador}@teste.com"
+    telefone = f"119{uuid4().int % 10**8:08d}"
+    id_usuario = admin_conn.execute(
+        """INSERT INTO usuarios (nome, email, telefone, hash_senha, status_conta, email_verificado)
+           VALUES ('Teste de sessões', %s, %s, %s, 'ativa', true) RETURNING id_usuario""",
+        (email, telefone, gerar_hash_senha(SENHA)),
+    ).fetchone()[0]
+    return id_usuario, email
+
+
+def _remover_usuario_sessoes(admin_conn, id_usuario):
+    admin_conn.execute("DELETE FROM auditoria WHERE id_usuario = %s", (id_usuario,))
+    admin_conn.execute("DELETE FROM usuarios WHERE id_usuario = %s", (id_usuario,))
+
+
+def test_refresh_rotaciona_token_e_logout_revoga_a_sessao(mundo, admin_conn):
+    id_usuario, email = _criar_usuario_sessoes(admin_conn)
+    client = mundo["client"]
+    try:
+        login = client.post("/auth/login", data={"username": email, "password": SENHA})
+        assert login.status_code == 200, login.text
+        credenciais = login.json()
+
+        renovado = client.post("/auth/refresh", json={"refresh_token": credenciais["refresh_token"]})
+        assert renovado.status_code == 200, renovado.text
+        credenciais_renovadas = renovado.json()
+        assert credenciais_renovadas["refresh_token"] != credenciais["refresh_token"]
+        assert client.post("/auth/refresh", json={"refresh_token": credenciais["refresh_token"]}).status_code == 401
+
+        logout = client.post("/auth/logout", json={"refresh_token": credenciais_renovadas["refresh_token"]})
+        assert logout.status_code == 200, logout.text
+        assert client.get(
+            "/auth/eu",
+            headers={"Authorization": f"Bearer {credenciais_renovadas['access_token']}"},
+        ).status_code == 401
+        assert client.post(
+            "/auth/refresh",
+            json={"refresh_token": credenciais_renovadas["refresh_token"]},
+        ).status_code == 401
+    finally:
+        _remover_usuario_sessoes(admin_conn, id_usuario)
+
+
+def test_trocar_senha_revoga_todos_os_tokens(mundo, admin_conn):
+    id_usuario, email = _criar_usuario_sessoes(admin_conn)
+    client = mundo["client"]
+    try:
+        login = client.post("/auth/login", data={"username": email, "password": SENHA})
+        assert login.status_code == 200, login.text
+        credenciais = login.json()
+
+        troca = client.post(
+            "/auth/me/senha",
+            json={"senha_atual": SENHA, "senha_nova": "Senha#Nova2026"},
+            headers={"Authorization": f"Bearer {credenciais['access_token']}"},
+        )
+        assert troca.status_code == 200, troca.text
+        assert client.get(
+            "/auth/eu",
+            headers={"Authorization": f"Bearer {credenciais['access_token']}"},
+        ).status_code == 401
+        assert client.post(
+            "/auth/refresh",
+            json={"refresh_token": credenciais["refresh_token"]},
+        ).status_code == 401
+    finally:
+        _remover_usuario_sessoes(admin_conn, id_usuario)
 
 
 # ------------------------------------------------------------------ erros {codigo, mensagem}
