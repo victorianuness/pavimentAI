@@ -2,7 +2,7 @@ import hmac
 import secrets
 
 import psycopg.errors
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 
 from .. import auditoria, residencia
@@ -31,6 +31,7 @@ from ..seguranca import (
     hash_codigo,
     verificar_senha,
 )
+from ..limite import RegraLimite, verificar_limite
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
@@ -73,7 +74,12 @@ def _criar_codigo_email(
 
 
 @router.post("/cadastro", status_code=201)
-def cadastro(dados: CadastroIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+def cadastro(request: Request, dados: CadastroIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+    verificar_limite(
+        request, conn, "cadastro",
+        RegraLimite(settings.limite_ip_cadastro, settings.janela_ip_cadastro_h * 3600,
+                    "Muitas tentativas de cadastro deste endereço. Tente novamente mais tarde."),
+    )
     try:
         u = conn.execute(
             """
@@ -145,7 +151,12 @@ def verificar_email(dados: VerificarEmailIn, conn=Depends(get_conn)):
 
 
 @router.post("/reenviar-codigo")
-def reenviar_codigo(dados: ReenviarIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+def reenviar_codigo(request: Request, dados: ReenviarIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+    verificar_limite(
+        request, conn, "reenviar-codigo",
+        RegraLimite(settings.limite_ip_reenvio_codigo, settings.janela_ip_reenvio_codigo_h * 3600,
+                    "Muitas solicitações de código deste endereço. Tente novamente mais tarde."),
+    )
     resposta = {"mensagem": "Se a conta existir e estiver pendente, um novo código foi enviado."}
 
     u = conn.execute(
@@ -171,7 +182,12 @@ def reenviar_codigo(dados: ReenviarIn, tarefas: BackgroundTasks, conn=Depends(ge
 
 
 @router.post("/login", response_model=TokenOut)
-def login(form: OAuth2PasswordRequestForm = Depends(), conn=Depends(get_conn)):
+def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), conn=Depends(get_conn)):
+    verificar_limite(
+        request, conn, "login",
+        RegraLimite(settings.limite_ip_login, settings.janela_ip_login_min * 60,
+                    "Muitas tentativas de login deste endereço. Tente novamente mais tarde."),
+    )
     email_login = form.username.strip().lower()
     u = conn.execute(
         "SELECT id_usuario, hash_senha, status_conta FROM usuarios WHERE lower(email) = %s",
@@ -352,7 +368,12 @@ MSG_ESQUECI = (
 
 
 @router.post("/esqueci-senha")
-def esqueci_senha(dados: EsqueciSenhaIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+def esqueci_senha(request: Request, dados: EsqueciSenhaIn, tarefas: BackgroundTasks, conn=Depends(get_conn)):
+    verificar_limite(
+        request, conn, "esqueci-senha",
+        RegraLimite(settings.limite_ip_esqueci_senha, settings.janela_ip_esqueci_senha_h * 3600,
+                    "Muitas solicitações de recuperação deste endereço. Tente novamente mais tarde."),
+    )
     u = conn.execute(
         "SELECT id_usuario, nome, email, status_conta FROM usuarios WHERE lower(email) = lower(%s)",
         (dados.email,),

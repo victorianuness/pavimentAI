@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     max_falhas_login: int = 5
     bloqueio_login_min: int = 15
 
+    # Limites por IP dos endpoints que geram custo, e-mail ou tentativa de autenticação.
+    limite_ip_login: int = 20
+    janela_ip_login_min: int = 15
+    limite_ip_cadastro: int = 5
+    janela_ip_cadastro_h: int = 1
+    limite_ip_reenvio_codigo: int = 5
+    janela_ip_reenvio_codigo_h: int = 1
+    limite_ip_esqueci_senha: int = 5
+    janela_ip_esqueci_senha_h: int = 1
+    # Só preencha com IPs de proxies sob seu controle. Nunca confie cegamente no header.
+    proxies_confiaveis: str = ""
+
     # Conexão separada, só do painel de admin (cadastrar cidades e mudar papéis).
     # Criada com: python scripts/criar_papel_admin_db.py
     db_admin_user: str | None = None

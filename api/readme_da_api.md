@@ -21,14 +21,14 @@ pip install -r requirements.txt
 cp .env.example .env            # configure as senhas do banco e gere um JWT_SECRET novo
 
 # Aplicação das migrações do banco de dados e funções geoespaciais
-python scripts/aplicar_sql.py sql/banco.sql sql/migracao_pavimentai_v2.sql sql/migracao_pavimentai_v3.sql sql/migracao_pavimentai_v4.sql sql/migracao_pavimentai_v5.sql sql/migracao_pavimentai_v6.sql sql/migracao_pavimentai_v7.sql sql/migracao_pavimentai_v8.sql sql/migracao_pavimentai_v9.sql sql/migracao_pavimentai_v10.sql
+python scripts/aplicar_sql.py sql/banco.sql sql/migracao_pavimentai_v2.sql sql/migracao_pavimentai_v3.sql sql/migracao_pavimentai_v4.sql sql/migracao_pavimentai_v5.sql sql/migracao_pavimentai_v6.sql sql/migracao_pavimentai_v7.sql sql/migracao_pavimentai_v8.sql sql/migracao_pavimentai_v9.sql sql/migracao_pavimentai_v10.sql sql/migracao_pavimentai_v11.sql
 
 # Inserção de limites geográficos de exemplo
 python scripts/aplicar_sql.py sql/limite_ribeirao_pires.sql
 python scripts/criar_papel_admin_db.py
 
 # Inicialização do servidor
-python -m uvicorn app.main:app --reload
+pavimentai
 ```
 
 - **Documentação Interativa (Swagger UI):** `http://127.0.0.1:8000/docs`
