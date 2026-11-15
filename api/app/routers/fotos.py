@@ -6,7 +6,11 @@ from typing import Annotated, Literal
 import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import FileResponse
-from psycopg.types.json import Jsonb
+
+try:
+    from psycopg.types.json import Jsonb  # type: ignore[reportMissingImports]
+except ImportError:
+    from psycopg2.extras import Json as Jsonb  # type: ignore[reportMissingImports]
 
 from .. import auditoria
 from ..acesso import SQL_VERIFICADA, exigir_acesso_a_ocorrencia, pode_ver
@@ -224,7 +228,7 @@ def enviar_foto(
                 analise = analisar_imagem(img.jpeg)
 
             except ModeloIndisponivel:
-                log.exception("Serviço YOLO indisponível durante o upload.")
+                logging.log.exception("Serviço YOLO indisponível durante o upload.")
 
                 raise HTTPException(
                     status_code=503,
