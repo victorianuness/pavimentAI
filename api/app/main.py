@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import get_conn, pool, pool_admin
 from .erros import registrar_handlers
-from .routers import admin, areas, auth, cep, fotos, gestao, ocorrencias, sinalizacoes
+from .notificacoes import laco_de_verificacao
+from .routers import admin, alertas, areas, auth, cep, fotos, gestao, ocorrencias, sinalizacoes
 from .servico_yolo import carregar_modelo
 
 log = logging.getLogger("pavimentai")
@@ -26,7 +28,15 @@ async def lifespan(app: FastAPI):
         carregar_modelo()
     except Exception as exc:
         log.warning("Modelo YOLO não pôde ser pré-carregado no startup: %s", exc)
+    # Conferência automática de clusters (avisa a secretaria por e-mail). Intervalo 0 = desligada.
+    tarefa_alertas = None
+    if settings.alerta_cluster_intervalo_min > 0:
+        tarefa_alertas = asyncio.create_task(laco_de_verificacao())
     yield
+    if tarefa_alertas is not None:
+        tarefa_alertas.cancel()
+        with suppress(asyncio.CancelledError):
+            await tarefa_alertas
     pool.close()
     if pool_admin is not None:
         pool_admin.close()
@@ -49,6 +59,7 @@ app.include_router(areas.router)
 app.include_router(cep.router)
 app.include_router(ocorrencias.router)
 app.include_router(fotos.router)
+app.include_router(alertas.router)  # antes de gestao: /gestao/alertas não pode cair numa rota de /gestao
 app.include_router(gestao.router)
 app.include_router(admin.router)
 app.include_router(sinalizacoes.router)

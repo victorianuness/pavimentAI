@@ -382,3 +382,74 @@ class TipoAlterarIn(BaseModel):
         if all(x is None for x in (self.nome, self.ativo, self.ordem, self.categorias)):
             raise ValueError("informe pelo menos um campo para alterar")
         return self
+
+# ------------------------------------------------------- alertas de cluster
+class ContatoAlertaIn(BaseModel):
+    canal: Literal["email"] = "email"  # WhatsApp ainda não é enviado pela API
+    destino: EmailNormalizado
+    rotulo: str | None = Field(default=None, max_length=80, description="Ex.: Secretaria de Obras")
+    id_area: int | None = Field(default=None, ge=1, description="Só o admin informa; o gestor usa a própria cidade")
+
+    @field_validator("rotulo")
+    @classmethod
+    def limpar_rotulo(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = " ".join(v.split())
+        return v or None
+
+
+class ContatoAlertaOut(BaseModel):
+    id_contato: int
+    id_area: int
+    canal: str
+    destino: str
+    rotulo: str | None
+    criado_em: datetime
+
+
+class AlertaClusterOut(BaseModel):
+    id_alerta: int
+    id_area: int
+    referencia_espacial: str
+    latitude: float
+    longitude: float
+    total_ocorrencias: int
+    nivel: Literal["normal", "moderada", "alta"]
+    motivo: Literal["novo", "escalada", "crescimento"]
+    status: Literal["pendente", "enviado", "parcial", "falhou", "simulado"]
+    destinatarios_total: int
+    destinatarios_enviados: int
+    resumo: dict
+    criado_em: datetime
+    enviado_em: datetime | None
+
+
+class PaginaAlertas(BaseModel):
+    total: int
+    limite: int
+    deslocamento: int
+    itens: list[AlertaClusterOut]
+
+
+class AlertaDetectadoOut(BaseModel):
+    id_alerta: int | None  # None quando é só simulação
+    id_area: int
+    area: str
+    referencia_espacial: str
+    latitude: float
+    longitude: float
+    total_ocorrencias: int
+    nivel: Literal["normal", "moderada", "alta"]
+    motivo: Literal["novo", "escalada", "crescimento"]
+    destinatarios_total: int
+    status: str  # nao_enviado (simulação), enviado, parcial, falhou ou simulado (SMTP não configurado)
+
+
+class VerificacaoOut(BaseModel):
+    executado: bool
+    simulado: bool
+    motivo: str | None
+    areas_verificadas: int
+    areas_sem_contato: list[int]
+    alertas: list[AlertaDetectadoOut]

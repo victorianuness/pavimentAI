@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     cluster_alerta_moderado_min: int = Field(default=5, ge=3, le=10000)
     cluster_alerta_alto_min: int = Field(default=10, ge=3, le=10000)
 
+    # Alertas automáticos de cluster (e-mail para a secretaria; ver notificacoes.py).
+    # A API confere os clusters a cada X minutos; 0 desliga a conferência automática
+    # (o gestor ainda pode pedir uma conferência na hora em POST /gestao/alertas/verificar).
+    alerta_cluster_intervalo_min: int = Field(default=15, ge=0, le=1440)
+    alerta_cluster_celula_m: int = Field(default=250, ge=50, le=1000)  # tamanho da célula da grade
+    alerta_cluster_minimo: int = Field(default=3, ge=2, le=100)  # ocorrências novas para formar um cluster
+    alerta_cluster_janela_h: int = Field(default=72, ge=1, le=720)  # "novas" = registradas nas últimas X horas
+    alerta_cluster_reenvio_h: int = Field(default=24, ge=1, le=720)  # espera mínima para reavisar a mesma célula
+    max_contatos_alerta_por_area: int = Field(default=10, ge=1, le=100)
+
     # Pasta onde as fotos ficam guardadas (por padrão: api/uploads).
     uploads_dir: Path = Path(__file__).resolve().parents[1] / "uploads"
 

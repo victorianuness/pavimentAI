@@ -276,7 +276,7 @@ def mapa(
             id_area = u["id_area_gestao"]
 
     linhas = conn.execute(
-        """
+        f"""
         SELECT v.id_ocorrencia, v.tipo, v.categoria, v.gravidade, v.status, v.canal_registro,
                v.confianca_max, v.criado_em, v.latitude, v.longitude, v.id_area,
                CASE WHEN o.triagem_decisao = 'aprovada' THEN 'aprovada_gestor'

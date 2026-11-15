@@ -14,6 +14,9 @@ import types
 
 import pytest
 
+# Nos testes a conferência automática de clusters fica desligada: ela mexeria no banco no meio dos testes.
+os.environ.setdefault("ALERTA_CLUSTER_INTERVALO_MIN", "0")
+
 # Se o ultralytics (YOLO) não estiver instalado, usa um substituto: estes testes não rodam a IA.
 try:
     import ultralytics  # noqa: F401
@@ -43,4 +46,30 @@ def admin_conn():
     if not nome.endswith("_teste"):
         pytest.skip("DB_NAME precisa terminar em _teste (estes testes apagam dados).")
     with psycopg.connect(_dsn_admin(), autocommit=True) as c:
+        # Zera o limite de login por IP: rodar os testes várias vezes seguidas estourava o limite (429).
+        c.execute("TRUNCATE limites_requisicoes_ip")
         yield c
+
+
+@pytest.fixture(scope="session")
+def client_api():
+    """Um único TestClient para a sessão inteira de testes que o usam.
+
+    O pool de conexões da API (app/db.py) é um só e, depois de fechado, não reabre. Por isso cada
+    `with TestClient(app)` num arquivo de teste fecha o pool para os arquivos seguintes.
+    Quem usa este fixture não depende da ordem; os arquivos antigos continuam com o próprio client.
+    """
+    from fastapi.testclient import TestClient
+    from psycopg_pool import PoolClosed
+
+    from app.main import app
+
+    cm = TestClient(app)
+    try:
+        client = cm.__enter__()
+    except PoolClosed:
+        pytest.skip("O pool da API já foi fechado por outro arquivo de teste: rode este arquivo antes ou sozinho.")
+    try:
+        yield client
+    finally:
+        cm.__exit__(None, None, None)

@@ -92,6 +92,40 @@ A regra de visibilidade segue o mapa existente: ocorrências verificadas são p�
 
 Para validar a implementação, rode `pytest tests/test_api.py.py tests/test_contrato_dia1.py` dentro de `api`. Os testes de rota exigem o banco de integração PostGIS descrito em `tests/conftest.py`; sem `TEST_ADMIN_DSN` ou sem um banco cujo nome termine em `_teste`, eles serão ignorados e não contarão como validação de integração.
 
+## Alertas automáticos de cluster (e-mail para a secretaria)
+
+Quando surge uma concentração de ocorrências novas numa região, a API avisa a secretaria da cidade por e-mail. O WhatsApp fica para uma segunda etapa (exige um provedor externo, como a API oficial da Meta ou a Twilio); a tabela já aceita `canal = 'whatsapp'`, mas a API só envia e-mail por enquanto.
+
+**Como ativar**
+
+1. Aplique a migração: `python scripts/aplicar_sql.py sql/migracao_pavimentai_v12.sql` (cria `contatos_alerta` e `alertas_cluster`).
+2. Configure o SMTP no `.env` (`SMTP_HOST`, `SMTP_PORTA`, `SMTP_USUARIO`, `SMTP_SENHA`, `SMTP_REMETENTE`). Sem `SMTP_HOST`, nada sai de verdade: o alerta é gravado como `simulado` e, com `AMBIENTE=dev`, o texto aparece no terminal da API.
+3. O gestor cadastra os e-mails da secretaria em `POST /gestao/alertas/contatos`. Cidade sem contato cadastrado não gera alerta.
+
+**Quando um aviso é gerado.** A cada `ALERTA_CLUSTER_INTERVALO_MIN` minutos (padrão 15; `0` desliga) a API conta, por célula da grade (mesma ideia do `GET /ocorrencias/clusters`, com a zona UTM do centro da cidade), as ocorrências **abertas e verificadas** registradas nas últimas `ALERTA_CLUSTER_JANELA_H` horas (padrão 72). Célula com `ALERTA_CLUSTER_MINIMO` ocorrências ou mais (padrão 3) é um cluster. Para não encher a caixa da secretaria, só há novo aviso quando:
+
+| Motivo | Quando |
+| :--- | :--- |
+| `novo` | o cluster nunca foi avisado |
+| `escalada` | o nível de concentração subiu desde o último aviso (normal → moderada → alta, limites em `CLUSTER_ALERTA_*_MIN`) |
+| `crescimento` | passaram `ALERTA_CLUSTER_REENVIO_H` horas (padrão 24) e há pelo menos `ALERTA_CLUSTER_MINIMO` ocorrências registradas depois do último aviso |
+
+Aviso em que **todos** os envios falharam não conta como "já avisado": a próxima conferência tenta de novo. Com mais de um processo da API rodando, um `advisory lock` do PostgreSQL garante que só um confere por vez (ninguém recebe e-mail em dobro). Na auditoria vai só a contagem de destinatários, nunca o e-mail.
+
+**Rotas** (gestor: só a própria cidade; admin: informa `id_area`)
+
+| Rota | O que faz |
+| :--- | :--- |
+| `GET /gestao/alertas/contatos` | lista os contatos de alerta |
+| `POST /gestao/alertas/contatos` | cadastra um e-mail (`{"destino": "obras@cidade.gov.br", "rotulo": "Secretaria de Obras"}`); máximo de `MAX_CONTATOS_ALERTA_POR_AREA` por cidade |
+| `DELETE /gestao/alertas/contatos/{id}` | remove um contato |
+| `GET /gestao/alertas` | histórico de alertas gerados (paginado, com status do envio) |
+| `POST /gestao/alertas/verificar` | confere agora, sem esperar o intervalo. Com `?simular=true` só mostra o que seria avisado, sem gravar nem enviar (ótimo para demonstração) |
+
+Limitações conhecidas: como no mapa, a grade pode separar pontos vizinhos que caem em lados opostos da borda de uma célula; o nível indica concentração de relatos, não risco real.
+
+Testes: `pytest tests/test_alertas_cluster.py tests/test_contrato_dia1.py` (mesmo banco de teste do `conftest.py`, com a migração v12 aplicada).
+
 ## Scripts Utilitários (`api/scripts/`)
 
 | Script | Finalidade |
