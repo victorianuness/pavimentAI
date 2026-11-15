@@ -3,7 +3,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
-
+import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, UploadFile
 from fastapi.responses import FileResponse
 from psycopg.types.json import Jsonb
@@ -15,7 +15,11 @@ from ..db import get_conn
 from ..deps import exigir_gestao_da_area, usuario_atual, usuario_opcional
 from ..imagens import MAX_BYTES, ImagemInvalida, processar
 from ..schemas import FotoOut
-from ..servico_yolo import VERSAO_MODELO, analisar_imagem
+from ..servico_yolo import (
+    VERSAO_MODELO,
+    ModeloIndisponivel,
+    analisar_imagem,
+)
 
 router = APIRouter(tags=["Fotos"])
 
@@ -218,10 +222,13 @@ def enviar_foto(
         if usa_ia:
             try:
                 analise = analisar_imagem(img.jpeg)
-            except FileNotFoundError:
+
+            except ModeloIndisponivel:
+                log.exception("Serviço YOLO indisponível durante o upload.")
+
                 raise HTTPException(
-                    503,
-                    "Serviço de análise de imagem (IA) indisponível no momento.",
+                    status_code=503,
+                    detail="Serviço de análise de imagem (IA) indisponível no momento."
                 )
 
             if analise["veredito"] == "recusada":

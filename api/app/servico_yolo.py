@@ -8,8 +8,12 @@ from ultralytics import YOLO
 from .config import settings
 
 LIMIAR_MINIMO = 0.25
+
 LIMIAR_CONFIRMA = 0.60  # a partir daqui a IA confirma sozinha; entre o mínimo e este valor vai para a triagem
 VERSAO_MODELO = "yolo11n-dataset-v3"
+
+LIMIAR_MINIMO = 0.25
+
 
 # Gravidade estimada pela área da caixa relativa à imagem
 AREA_MODERADO = 0.02
@@ -44,11 +48,14 @@ def carregar_modelo():
             if _modelo is None:
                 caminho = _descobrir_caminho_modelo()
                 if not caminho.is_file():
+                    raise FileNotFoundError(f"Modelo YOLO não encontrado: {caminho}")
+
+                try:
+                    _modelo = YOLO(str(caminho))
+                except Exception as exc:
                     raise FileNotFoundError(
-                        f"Modelo YOLO não encontrado em {caminho}. "
-                        "Coloque o arquivo best.pt ou best.onnx na pasta correta ou aponte YOLO_MODEL_PATH no .env."
-                    )
-                _modelo = YOLO(str(caminho))
+                        "Não foi possível carregar o modelo YOLO."
+                    ) from exc
     return _modelo
 
 
@@ -72,8 +79,19 @@ def analisar_imagem(dados_jpeg: bytes) -> dict:
         raise ValueError("Arquivo de imagem inválido ou corrompido para análise da IA.") from exc
 
     modelo = carregar_modelo()
-    with _lock_modelo:
-        r = modelo.predict(imagem, imgsz=640, conf=LIMIAR_MINIMO, verbose=False)[0]
+
+    try:
+        with _lock_modelo:
+            r = modelo.predict(
+                imagem,
+                imgsz=640,
+                conf=LIMIAR_MINIMO,
+                verbose=False,
+            )[0]
+    except Exception as exc:
+        raise FileNotFoundError(
+            "Falha durante a análise da imagem pelo YOLO."
+        ) from exc
 
     caixas = []
     for b in r.boxes:
