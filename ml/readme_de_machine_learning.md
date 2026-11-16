@@ -4,7 +4,8 @@ Pipeline de treinamento, validação, coleta aberta e inferência do modelo de d
 
 ## Estrutura da Pasta
 
-- `oitavotreino - joao/weights/` — Pesos treinados e exportados para produção e borda (`best.onnx`, `best.tflite`).
+- `dados_treinamento/` — Métricas, curvas, matrizes de confusão e a pasta `weights/` do treino.
+- `models/yolo11n/best.pt` — Modelo usado pela API. Fica fora do Git (veja o `README.md` da raiz).
 - `inference/testar_modelo.py` — Executa inferência e rastreamento (*ByteTrack*) em vídeos, imagens ou pastas de fotos.
 - `checar_vazamento.py` — Audita *data leakage* (imagens duplicadas ou espelhadas) entre `train`, `val` e `test` via *dHash* de 64 bits.
 - `coletar_mapillary.py` — Coleta imagens públicas e abertas (CC-BY-SA) de ruas do ABC Paulista via Mapillary API v4, com opção de pré-rotulagem automática (*Pseudo-Labeling*).

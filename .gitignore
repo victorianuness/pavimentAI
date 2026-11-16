@@ -8,6 +8,5 @@ venv/
 .venv/
 __pycache__/
 api/uploads/
-*.pt
 ml/datasets 
 ml/inference/videos_de_teste/

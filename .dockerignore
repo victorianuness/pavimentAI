@@ -1,0 +1,20 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+.venv
+venv
+
+# segredos nunca entram na imagem
+.env
+.env.*
+!.env.example
+api/.env
+api/.env.*
+!api/.env.example
+
+api/uploads
+ml/avaliacao/videos_de_teste
+ml/inference/videos_de_teste
+ml/datasets
+web/_legado

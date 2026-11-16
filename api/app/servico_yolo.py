@@ -7,8 +7,6 @@ from ultralytics import YOLO
 
 from .config import settings
 
-LIMIAR_MINIMO = 0.25
-
 LIMIAR_CONFIRMA = 0.60  # a partir daqui a IA confirma sozinha; entre o mínimo e este valor vai para a triagem
 VERSAO_MODELO = "yolo11n-dataset-v3"
 
@@ -21,6 +19,12 @@ AREA_GRAVE = 0.06
 
 _modelo = None
 _lock_modelo = threading.Lock()
+
+
+class ModeloIndisponivel(RuntimeError):
+    """O modelo YOLO não existe, não carregou ou falhou ao analisar a imagem.
+
+    A rota de upload transforma isto em 503 (e não em 500 genérico)."""
 
 
 def _descobrir_caminho_modelo() -> Path:
@@ -37,7 +41,7 @@ def _descobrir_caminho_modelo() -> Path:
     for c in candidatos:
         if c.is_file():
             return c
-    # Fallback padrão (lançará FileNotFoundError informativo se nenhum existir)
+    # Fallback padrão (carregar_modelo levantará ModeloIndisponivel se nenhum existir)
     return raiz / "ml" / "models" / "yolo11n" / "best.pt"
 
 
@@ -48,13 +52,13 @@ def carregar_modelo():
             if _modelo is None:
                 caminho = _descobrir_caminho_modelo()
                 if not caminho.is_file():
-                    raise FileNotFoundError(f"Modelo YOLO não encontrado: {caminho}")
+                    raise ModeloIndisponivel(f"Modelo YOLO não encontrado: {caminho}")
 
                 try:
                     _modelo = YOLO(str(caminho))
                 except Exception as exc:
-                    raise FileNotFoundError(
-                        "Não foi possível carregar o modelo YOLO."
+                    raise ModeloIndisponivel(
+                        f"Não foi possível carregar o modelo YOLO em {caminho}."
                     ) from exc
     return _modelo
 
@@ -89,9 +93,7 @@ def analisar_imagem(dados_jpeg: bytes) -> dict:
                 verbose=False,
             )[0]
     except Exception as exc:
-        raise FileNotFoundError(
-            "Falha durante a análise da imagem pelo YOLO."
-        ) from exc
+        raise ModeloIndisponivel("Falha durante a análise da imagem pelo YOLO.") from exc
 
     caixas = []
     for b in r.boxes:

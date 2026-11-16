@@ -14,22 +14,22 @@ Plataforma inteligente para zeladoria urbana colaborativa (detecção de buracos
 
 ## Como executar localmente
 
-Dentro da pasta `api`, com o ambiente virtual ativo:
+Para subir tudo com Docker, veja o `README.md` da raiz. Sem Docker, dentro da pasta `api`, com o ambiente virtual ativo
+e um PostgreSQL com PostGIS já rodando:
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env            # configure as senhas do banco e gere um JWT_SECRET novo
+cp .env.example .env            # preencha DB_PASSWORD, DB_ADMIN_PASSWORD e gere um JWT_SECRET novo
 
-# Aplicação das migrações do banco de dados e funções geoespaciais
-python scripts/aplicar_sql.py sql/banco.sql sql/migracao_pavimentai_v2.sql sql/migracao_pavimentai_v3.sql sql/migracao_pavimentai_v4.sql sql/migracao_pavimentai_v5.sql sql/migracao_pavimentai_v6.sql sql/migracao_pavimentai_v7.sql sql/migracao_pavimentai_v8.sql sql/migracao_pavimentai_v9.sql sql/migracao_pavimentai_v10.sql sql/migracao_pavimentai_v11.sql
+# cria o banco do zero: banco.sql + migrações v2..v12 + usuários + cidade de exemplo
+PGPASSWORD=<senha do postgres> python scripts/inicializar_banco.py
 
-# Inserção de limites geográficos de exemplo
-python scripts/aplicar_sql.py sql/limite_ribeirao_pires.sql
-python scripts/criar_papel_admin_db.py
-
-# Inicialização do servidor
-pavimentai
+# inicia o servidor
+uvicorn app.main:app --reload
 ```
+
+O `inicializar_banco.py` pode rodar quantas vezes quiser. Para aplicar só um arquivo (por exemplo uma migração nova),
+use `python scripts/aplicar_sql.py sql/migracao_pavimentai_v12.sql`.
 
 - **Documentação Interativa (Swagger UI):** `http://127.0.0.1:8000/docs`
 - **Healthcheck (Banco + PostGIS):** `http://127.0.0.1:8000/saude`
@@ -96,7 +96,7 @@ Exemplo reduzido de resposta:
 
 A regra de visibilidade segue o mapa existente: ocorrências verificadas são públicas; `verificacao=todas` inclui registros não verificados somente para gestão. O endpoint não expõe dados pessoais, fotos ou detecções como linhas independentes. A grade não é um agrupamento por distância: pontos em lados opostos da borda de uma célula podem ficar separados; a posição do marcador é o centro da célula, não o centroide dos relatos. O cálculo UTM é limitado à faixa entre 80°S e 84°N. Não há migração adicional; o índice GiST existente na localização é usado no filtro da área.
 
-Para validar a implementação, rode `pytest tests/test_api.py.py tests/test_contrato_dia1.py` dentro de `api`. Os testes de rota exigem o banco de integração PostGIS descrito em `tests/conftest.py`; sem `TEST_ADMIN_DSN` ou sem um banco cujo nome termine em `_teste`, eles serão ignorados e não contarão como validação de integração.
+Para validar a implementação, rode `pytest tests` dentro de `api`. Os testes de rota exigem o banco de integração PostGIS descrito em `tests/conftest.py`; sem `TEST_ADMIN_DSN` ou sem um banco cujo nome termine em `_teste`, eles serão ignorados e não contarão como validação de integração.
 
 ## Alertas automáticos de cluster (e-mail para a secretaria)
 
@@ -136,6 +136,7 @@ Testes: `pytest tests/test_alertas_cluster.py tests/test_contrato_dia1.py` (mesm
 
 | Script | Finalidade |
 | :--- | :--- |
+| `inicializar_banco.py` | Monta o banco do zero (schema, migrações, usuários e cidade de exemplo). É o que o Docker roda. |
 | `aplicar_sql.py` | Aplica scripts `.sql` em ordem numérica natural e com transação atômica por arquivo. |
 | `baixar_limite.py` | Baixa a malha municipal oficial do IBGE e gera o `.sql` idempotente (`sql/limite_<cidade>.sql`). |
 | `criar_papel_admin_db.py` | Cria e configura a role restrita `pavimentai_admin` para as rotas `/admin/*`. |
@@ -147,6 +148,6 @@ Testes: `pytest tests/test_alertas_cluster.py tests/test_contrato_dia1.py` (mesm
 
 1. **Cerca Geográfica PostGIS:** Só aceita ocorrências dentro do polígono oficial (`ST_DWithin` com tolerância configurável de divisa) de municípios ativos.
 2. **Antifraude Fotográfico e LGPD:** Exige foto recente e próxima ao local (`ST_Distance`), bloqueia fotos duplicadas (SHA-256) ou visualmente similares em outras ocorrências (*dHash* perceptual de 64 bits via `bit_count` no PostgreSQL), corrige orientação e remove todos os metadados EXIF ao regravar a imagem.
-3. **Triagem Inteligente com YOLO11n:** Fotos da câmera com confiança $\ge 60\%$ são confirmadas automaticamente e preenchem a severidade estimada pela área da *bounding box*; fotos entre $25\%$ e $60\%$ (ou vindas da galeria) vão para a Fila de Triagem do Gestor; fotos $< 25\%$ são recusadas na hora.
+3. **Triagem Inteligente com YOLO11n:** Fotos da câmera com confiança de 60% ou mais são confirmadas automaticamente e preenchem a severidade estimada pela área da *bounding box*; fotos entre 25% e 60% (ou vindas da galeria) vão para a Fila de Triagem do Gestor; fotos abaixo de 25% são recusadas na hora.
 4. **Segregação de Privilégios no PostgreSQL:** A conexão pública (`pavimentai_app`) não tem permissão de `DELETE` nem de alterar papéis ou áreas; a conexão administrativa (`pavimentai_admin`) só altera colunas específicas e nunca lê hashes de senha.
 5. **Conformidade LGPD (`DELETE /auth/me`):** Anonimização irreversível de dados pessoais de cidadãos via `SECURITY DEFINER` preservando o histórico estatístico da zeladoria urbana.

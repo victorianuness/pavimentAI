@@ -6,24 +6,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /workspace
 
-# Dependências mínimas de sistema para OpenCV Headless / Pillow
+# Bibliotecas de sistema que o OpenCV (headless) e o Pillow precisam
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala as dependências Python da API
-COPY api/requirements.txt /workspace/api/requirements.txt
-RUN pip install --upgrade pip && pip install -r /workspace/api/requirements.txt pytest httpx
+# PyTorch só para CPU: a versão padrão do pip traz CUDA e a imagem passa de 5 GB
+RUN pip install --upgrade pip && \
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-# Copia os módulos do projeto (api, ml com pesos e web)
+# Dependências da API (httpx2 é exigido pelo TestClient do FastAPI nos testes)
+COPY api/requirements.txt /workspace/api/requirements.txt
+RUN pip install -r /workspace/api/requirements.txt pytest pytest-cov httpx httpx2
+
+# O .env NÃO entra na imagem (veja .dockerignore): o compose injeta as variáveis
 COPY api /workspace/api
 COPY ml /workspace/ml
 COPY web /workspace/web
 
 WORKDIR /workspace/api
-
-# Cria diretório persistente de uploads com permissões adequadas
 RUN mkdir -p /workspace/api/uploads
 
 EXPOSE 8000

@@ -1,3 +1,5 @@
+# Subir tudo do zero:   docker compose up --build
+# Pré-requisito: criar os dois arquivos de senha (veja o README).
 services:
   db:
     image: postgis/postgis:16-3.4-alpine
@@ -6,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: pavimentai
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env da raiz}
     ports:
       - "5432:5432"
     volumes:
@@ -17,6 +19,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # Roda uma vez e termina: cria as tabelas, aplica as migrações (v2...v12) e ajusta os usuários.
+  # Pode rodar de novo a qualquer momento sem estragar nada.
+  migracoes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pavimentai_migracoes
+    command: ["python", "scripts/inicializar_banco.py"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./api/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+
   api:
     build:
       context: .
@@ -26,6 +48,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migracoes:
+        condition: service_completed_successfully
     env_file:
       - ./api/.env
     environment:
@@ -35,6 +59,14 @@ services:
       - "8000:8000"
     volumes:
       - uploads_pavimentai:/workspace/api/uploads
+      # O best.pt não vai para o Git (*.pt no .gitignore): coloque em ml/models/yolo11n/best.pt
+      - ./ml/models:/workspace/ml/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/saude', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   pgdata_pavimentai:

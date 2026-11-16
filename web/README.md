@@ -7,7 +7,7 @@ A API (FastAPI) já entrega esta pasta em `/web/`, então não precisa de servid
 
 ```bash
 # opção 1: pela própria API (recomendado) — abre http://127.0.0.1:8000/web/
-cd api && pavimentai
+cd api && uvicorn app.main:app --reload
 
 # opção 2: Live Server / qualquer servidor estático na pasta web/ (porta 5500, 3000, 5173 ou 8080).
 # Nesse caso o front chama a API em http://127.0.0.1:8000. Para outro endereço, no console do navegador:

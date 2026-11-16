@@ -25,6 +25,8 @@ from ..servico_yolo import (
     analisar_imagem,
 )
 
+log = logging.getLogger("pavimentai.fotos")
+
 router = APIRouter(tags=["Fotos"])
 
 MAX_FOTOS_POR_OCORRENCIA = 5
@@ -228,8 +230,7 @@ def enviar_foto(
                 analise = analisar_imagem(img.jpeg)
 
             except ModeloIndisponivel:
-                logging.log.exception("Serviço YOLO indisponível durante o upload.")
-
+                log.exception("Serviço YOLO indisponível durante o upload.")
                 raise HTTPException(
                     status_code=503,
                     detail="Serviço de análise de imagem (IA) indisponível no momento."
