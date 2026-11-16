@@ -1,7 +1,0 @@
-Coloque aqui o arquivo best.pt do modelo treinado (ml/models/yolo11n/best.pt).
-
-Ele não vai para o Git (o .gitignore ignora *.pt) e é montado dentro do container pelo docker compose.
-Sem o arquivo a API sobe normalmente, mas o upload de foto de buraco responde 503
-("Serviço de análise de imagem (IA) indisponível") até o modelo ser colocado aqui.
-
-Para usar outro caminho, defina YOLO_MODEL_PATH no api/.env.
