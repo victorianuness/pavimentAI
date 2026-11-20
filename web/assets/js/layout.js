@@ -70,7 +70,7 @@ function renderRodape() {
   const alvo = document.getElementById('rodape');
   if (!alvo) return;
   alvo.innerHTML = `
-    <footer class="border-t border-line bg-surface mt-16">
+    <footer class="border-t border-line bg-surface">
       <div class="max-w-7xl mx-auto px-4 py-8 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between text-sm text-ink-soft">
         <p><span class="font-bold text-ink">PavimentAI</span> — zeladoria urbana inteligente com visão computacional.</p>
         <p class="text-xs">Mapa © colaboradores do OpenStreetMap · Limites municipais: IBGE</p>

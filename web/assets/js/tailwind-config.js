@@ -6,21 +6,21 @@ tailwind.config = {
     extend: {
       colors: {
         brand: {
-          50: '#f2faf5',
-          100: '#e0f3e7',
-          200: '#c1e6cf',
-          300: '#93d2ae',
-          400: '#5bb787',
-          500: '#34a06b',
-          600: '#1f8556',
-          700: '#196a46',
-          800: '#16543a',
-          900: '#134531',
+          50: '#eef4fb',
+          100: '#dbe8f7',
+          200: '#bfd3ed',
+          300: '#9dbbe0',
+          400: '#648bb9',
+          500: '#315f9d',
+          600: '#1f4f87',
+          700: '#173d68',
+          800: '#102f56',
+          900: '#071a33',
         },
         ink: {
-          DEFAULT: '#14231b', // texto principal (preto esverdeado)
-          soft: '#5b6b62',    // texto secundário
-          faint: '#8a9a91',   // legendas
+          DEFAULT: '#101c2d',
+          soft: '#5b6877',
+          faint: '#8995a4',
         },
         line: '#e3ebe6',      // bordas
         surface: '#f6faf7',   // fundos suaves
